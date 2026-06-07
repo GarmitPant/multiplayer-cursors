@@ -12,7 +12,7 @@ export function buildWsUrl(canvasId, name, identity = null) {
 }
 
 /** Reconnect-with-backoff wrapper (connection layer, not the engine). */
-export function connectWithBackoff(urlOrFn, { onMessage, onOpen, onClose }) {
+export function connectWithBackoff(urlOrFn, { onMessage, onOpen, onClose, onConnecting }) {
   let ws = null;
   let backoffMs = 500;
   let reconnectTimer = null;
@@ -27,6 +27,7 @@ export function connectWithBackoff(urlOrFn, { onMessage, onOpen, onClose }) {
   }
 
   function connect() {
+    onConnecting?.();
     ws = new WebSocket(resolveUrl());
     ws.onopen = () => {
       backoffMs = 500;

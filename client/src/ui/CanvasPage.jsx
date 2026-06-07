@@ -106,8 +106,11 @@ export default function CanvasPage() {
     return !!(location.state?.name || sessionStorage.getItem(NAME_KEY));
   });
   const [presence, setPresence] = useState([]);
+  const [connStatus, setConnStatus] = useState('connecting');
   const setPresenceRef = useRef(setPresence);
   setPresenceRef.current = setPresence;
+  const setConnStatusRef = useRef(setConnStatus);
+  setConnStatusRef.current = setConnStatus;
 
   useEffect(() => {
     if (!active || !displayName) return undefined;
@@ -371,9 +374,16 @@ export default function CanvasPage() {
       const id = loadPersistedIdentity(canvasId);
       return buildWsUrl(canvasId, displayName, id);
     }, {
-      onOpen: (socket) => { ws = socket; },
+      onConnecting: () => setConnStatusRef.current('connecting'),
+      onOpen: (socket) => {
+        ws = socket;
+        setConnStatusRef.current('connected');
+      },
       onMessage: onWsMessage,
-      onClose: () => { ws = null; },
+      onClose: () => {
+        ws = null;
+        setConnStatusRef.current('connecting');
+      },
     });
 
     const keyframeTimer = setInterval(() => {
@@ -479,6 +489,7 @@ export default function CanvasPage() {
       Object.keys(peers).forEach(dropPeer);
       presenceById.clear();
       setPresenceRef.current([]);
+      setConnStatusRef.current('connecting');
     };
   }, [canvasId, displayName, active]);
 
@@ -494,6 +505,11 @@ export default function CanvasPage() {
       <canvas ref={canvasRef} className="trail" />
       <div ref={cursorsRef} className="cursors" />
       <AvatarStack users={presence} />
+      {active && connStatus !== 'connected' ? (
+        <div className="connecting-banner" role="status" aria-live="polite">
+          Connecting…
+        </div>
+      ) : null}
       <div className="canvas-chrome-left">
         <div className="hud">{hudText}</div>
         <SharePanel canvasId={canvasId} />
