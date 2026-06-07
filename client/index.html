@@ -6,7 +6,7 @@
   <style>
     html, body { margin: 0; height: 100%; overflow: hidden; font-family: sans-serif; background: #fafafa; }
     .cursor { position: absolute; transform: translate(-2px, -2px); pointer-events: none;
-              transition: left .05s linear, top .05s linear; display: flex; align-items: center; }
+              display: flex; align-items: center; }
     .dot { width: 10px; height: 10px; border-radius: 50%; }
     .name { font-size: 11px; margin-left: 6px; color: #333; }
     #hud { position: fixed; top: 8px; left: 8px; font-size: 12px; color: #555; }
@@ -16,9 +16,49 @@
   <div id="hud"></div>
   <!--
     PLACEHOLDER UI. Cursor capture + rendering is the LLD innovation area.
-    This exists only to prove the backend slice end-to-end. Replace entirely in the LLD phase.
+    M2: send-on-delta emitter + heartbeat keyframes. Receiver: direct apply (steppy — M3 reconstructs).
   -->
   <script>
+    // §9 tuning parameters — named config, no inline literals in logic below
+    const CONFIG = {
+      EPS_POS: 0.005,
+      VEL_SMOOTH: 0.5,
+      KEYFRAME_MS: 1500,
+      BLEND_MS: 100,
+      CLAMP_MS: 2000,
+      PRESENCE_TIMEOUT_MS: 5000,
+      EPS_RDP: 0.003,
+      DRAW_WINDOW: 16,
+      ONE_EURO_MINCUTOFF: 1.0,
+      ONE_EURO_BETA: 0.007,
+      TRAIL_TTL_MS: 800,
+    };
+
+    // ── pure emitter helpers (mirrored in tests/test_emitter.py) ───────────────
+    function predictPosition(p0, v0, t0, t) {
+      const dt = t - t0;
+      return [p0[0] + v0[0] * dt, p0[1] + v0[1] * dt];
+    }
+
+    function distance(a, b) {
+      return Math.hypot(a[0] - b[0], a[1] - b[1]);
+    }
+
+    function shouldEmitDelta(belief, pReal, t, epsPos) {
+      if (!belief) return true;
+      const pPred = predictPosition(belief.p, belief.v, belief.t, t);
+      return distance(pReal, pPred) > epsPos;
+    }
+
+    function smoothVelocity(prevV, rawV, alpha) {
+      if (prevV === null) return rawV;
+      return [
+        alpha * rawV[0] + (1 - alpha) * prevV[0],
+        alpha * rawV[1] + (1 - alpha) * prevV[1],
+      ];
+    }
+
+    // ── room / connection ─────────────────────────────────────────────────────
     const room = location.hash.slice(1) || "demo";
     const name = new URLSearchParams(location.search).get("name")
                  || "anon-" + Math.random().toString(36).slice(2, 6);
@@ -29,29 +69,53 @@
     hud.textContent = `room: ${room} | name: ${name}`;
 
     let me = null;
-    const peers = {}; // user_id -> { el }
+    let myColor = null;
+    const peers = {}; // user_id -> { el, dotEl, nameEl }
 
     function ensurePeer(uid, color, nm) {
-      if (peers[uid]) return peers[uid];
-      const el = document.createElement("div");
-      el.className = "cursor";
-      el.innerHTML = `<span class="dot" style="background:${color || '#333'}"></span>`
-                   + `<span class="name">${nm || ''}</span>`;
-      document.body.appendChild(el);
-      return (peers[uid] = { el });
+      let p = peers[uid];
+      if (!p) {
+        const el = document.createElement("div");
+        el.className = "cursor";
+        const dotEl = document.createElement("span");
+        dotEl.className = "dot";
+        dotEl.style.background = color || "#333";
+        const nameEl = document.createElement("span");
+        nameEl.className = "name";
+        nameEl.textContent = nm || "";
+        el.appendChild(dotEl);
+        el.appendChild(nameEl);
+        document.body.appendChild(el);
+        p = peers[uid] = { el, dotEl, nameEl };
+      }
+      applyPeerIdentity(uid, color, nm);
+      return p;
     }
+
+    function applyPeerIdentity(uid, color, nm) {
+      const p = peers[uid];
+      if (!p) return;
+      if (color) p.dotEl.style.background = color;
+      if (nm) p.nameEl.textContent = nm;
+    }
+
     function movePeer(uid, x, y) {
       const p = peers[uid]; if (!p) return;
       p.el.style.left = (x * innerWidth) + "px";
       p.el.style.top = (y * innerHeight) + "px";
     }
-    function dropPeer(uid) { if (peers[uid]) { peers[uid].el.remove(); delete peers[uid]; } }
+
+    function dropPeer(uid) {
+      if (peers[uid]) { peers[uid].el.remove(); delete peers[uid]; }
+    }
 
     const ws = new WebSocket(WS_URL);
+
     ws.onmessage = (e) => {
       const m = JSON.parse(e.data);
       if (m.type === "init") {
         me = m.self.user_id;
+        myColor = m.self.color;
         hud.textContent += ` | served by: ${m.replica}`;
         (m.peers || []).forEach(p => ensurePeer(p.user_id, p.color, p.name));
       } else if (m.type === "peer_joined") {
@@ -61,28 +125,78 @@
       } else if (m.type === "cursor") {
         if (m.user_id && m.user_id !== me && m.p) {
           ensurePeer(m.user_id, m.color, m.name);
+          if (m.kf || m.name || m.color) applyPeerIdentity(m.user_id, m.color, m.name);
           movePeer(m.user_id, m.p[0], m.p[1]);
         }
       }
-      // "draw" intentionally not rendered here — trail UX is M4.
     };
 
-    // M1: naive velocity estimate; direct apply on receive (no prediction yet)
-    let last = 0, prevP = null, prevT = null;
-    addEventListener("mousemove", (ev) => {
-      const now = performance.now();
-      if (now - last < 50) return;
-      last = now;
+    // ── M2 emitter: send-on-delta + heartbeat keyframes ───────────────────────
+    let belief = null;
+    let prevP = null, prevT = null;
+    let vSmooth = null;
+    let lastKeyframeMs = 0;
+    let pointerInside = true;
+
+    function normPos(ev) {
+      return [ev.clientX / innerWidth, ev.clientY / innerHeight];
+    }
+
+    function emitCursor(p, v, t, keyframe) {
       if (ws.readyState !== 1) return;
-      const t = now / 1000;
-      const p = [ev.clientX / innerWidth, ev.clientY / innerHeight];
-      let v = [0, 0];
+      const msg = { type: "cursor", p, v, t };
+      if (keyframe) {
+        msg.kf = true;
+        msg.name = name;
+        msg.color = myColor || "#333";
+      }
+      ws.send(JSON.stringify(msg));
+      belief = { p: [p[0], p[1]], v: [v[0], v[1]], t };
+    }
+
+    function processSample(p, t, forceEmit) {
+      let rawV = [0, 0];
       if (prevP !== null && prevT !== null) {
         const dt = t - prevT;
-        if (dt > 0) v = [(p[0] - prevP[0]) / dt, (p[1] - prevP[1]) / dt];
+        if (dt > 0) rawV = [(p[0] - prevP[0]) / dt, (p[1] - prevP[1]) / dt];
       }
-      prevP = p; prevT = t;
-      ws.send(JSON.stringify({ type: "cursor", p, v, t }));
+      const vNew = smoothVelocity(vSmooth, rawV, CONFIG.VEL_SMOOTH);
+      vSmooth = vNew;
+      prevP = [p[0], p[1]];
+      prevT = t;
+
+      const nowMs = performance.now();
+      if (nowMs - lastKeyframeMs >= CONFIG.KEYFRAME_MS) {
+        lastKeyframeMs = nowMs;
+        emitCursor(p, vNew, t, true);
+        return;
+      }
+
+      if (forceEmit || shouldEmitDelta(belief, p, t, CONFIG.EPS_POS)) {
+        emitCursor(p, vNew, t, false);
+      }
+    }
+
+    addEventListener("mousemove", (ev) => {
+      if (!pointerInside) pointerInside = true;
+      const t = performance.now() / 1000;
+      const p = normPos(ev);
+      const firstMove = belief === null;
+      processSample(p, t, firstMove);
+    });
+
+    addEventListener("mouseleave", () => {
+      pointerInside = false;
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: "cursor_leave" }));
+      belief = null;
+      prevP = null;
+      prevT = null;
+      vSmooth = null;
+    });
+
+    addEventListener("mouseenter", () => {
+      pointerInside = true;
+      belief = null;
     });
   </script>
 </body>
