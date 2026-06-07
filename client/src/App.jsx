@@ -162,8 +162,6 @@ export default function App() {
         ctx.lineTo(f.ox + f.bw, y);
         ctx.stroke();
       }
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.12)';
-      ctx.strokeRect(f.ox, f.oy, f.bw, f.bh);
     }
 
     function drawTrails(nowMs) {

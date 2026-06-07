@@ -3,13 +3,14 @@ export const BOARD_ASPECT = 16 / 9;   // documented constant
 
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 
-// Letterbox a fixed-aspect board into the viewport (vw, vh).
+// Cover-fit a fixed-aspect board into the viewport (vw, vh): fills the window,
+// cropping overflow (no letterbox margins). Opposite of "contain" letterbox.
 export function fit(vw, vh, aspect = BOARD_ASPECT) {
   const vAspect = vw / vh;
   let bw, bh;
-  if (vAspect > aspect) { bh = vh; bw = vh * aspect; }   // limited by height (viewport wider than board)
-  else                  { bw = vw; bh = vw / aspect; }   // limited by width  (viewport taller than board)
-  return { bw, bh, ox: (vw - bw) / 2, oy: (vh - bh) / 2 };  // centered ⇒ equal margins
+  if (vAspect > aspect) { bw = vw; bh = vw / aspect; }   // wide viewport — crop top/bottom
+  else                  { bh = vh; bw = vh * aspect; }   // tall viewport — crop left/right
+  return { bw, bh, ox: (vw - bw) / 2, oy: (vh - bh) / 2 };
 }
 
 // logical [0,1] → screen px

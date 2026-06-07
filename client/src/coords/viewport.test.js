@@ -27,7 +27,7 @@ describe('viewport transform', () => {
   });
 
   // Feature: collaborative-cursor-scaffold, Property 13: toScreen maps the board rectangle exactly, and the fit is centered and within the viewport
-  it('Property 13: board rect, aspect, centering, and fit within viewport', () => {
+  it('Property 13: board rect, aspect, centering, and cover-fits viewport', () => {
     fc.assert(
       fc.property(posDim, posDim, (vw, vh) => {
         const f = fit(vw, vh, BOARD_ASPECT);
@@ -36,10 +36,10 @@ describe('viewport transform', () => {
         const aspectOk = Math.abs((f.bw / f.bh) - BOARD_ASPECT) < TOL;
         const centerOk = Math.abs(f.ox - (vw - f.bw) / 2) < TOL
           && Math.abs(f.oy - (vh - f.bh) / 2) < TOL;
-        const withinOk = f.bw <= vw + TOL && f.bh <= vh + TOL && f.ox >= -TOL && f.oy >= -TOL;
+        const coverOk = f.bw >= vw - TOL && f.bh >= vh - TOL;
         const cornersOk = Math.abs(tl[0] - f.ox) < TOL && Math.abs(tl[1] - f.oy) < TOL
           && Math.abs(br[0] - (f.ox + f.bw)) < TOL && Math.abs(br[1] - (f.oy + f.bh)) < TOL;
-        return aspectOk && centerOk && withinOk && cornersOk;
+        return aspectOk && centerOk && coverOk && cornersOk;
       }),
       { numRuns: 100 },
     );
