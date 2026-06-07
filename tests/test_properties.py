@@ -1,6 +1,7 @@
 from hypothesis import given, settings, strategies as st
 
-from app.main import chan, COLORS
+from app.backplane import chan
+from app.identity import COLORS
 
 
 # Feature: collaborative-cursor-scaffold, Property 1: For any two distinct room
