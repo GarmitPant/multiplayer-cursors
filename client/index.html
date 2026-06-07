@@ -15,11 +15,9 @@
 <body>
   <div id="hud"></div>
   <!--
-    PLACEHOLDER UI. Cursor capture + rendering is the LLD innovation area.
-    M2: send-on-delta emitter + heartbeat keyframes. Receiver: direct apply (steppy — M3 reconstructs).
+    PLACEHOLDER UI. M2: send-on-delta + keyframes. M3: rAF reconstruction (extrapolate + blend + clamp).
   -->
   <script>
-    // §9 tuning parameters — named config, no inline literals in logic below
     const CONFIG = {
       EPS_POS: 0.005,
       VEL_SMOOTH: 0.5,
@@ -34,7 +32,7 @@
       TRAIL_TTL_MS: 800,
     };
 
-    // ── pure emitter helpers (mirrored in tests/test_emitter.py) ───────────────
+    // ── pure helpers (mirrored in tests/test_emitter.py, tests/test_receiver.py) ─
     function predictPosition(p0, v0, t0, t) {
       const dt = t - t0;
       return [p0[0] + v0[0] * dt, p0[1] + v0[1] * dt];
@@ -58,6 +56,21 @@
       ];
     }
 
+    function blendToward(pRender, target, dtSec, blendMs) {
+      const factor = Math.min(1, dtSec * 1000 / blendMs);
+      return [
+        pRender[0] + (target[0] - pRender[0]) * factor,
+        pRender[1] + (target[1] - pRender[1]) * factor,
+      ];
+    }
+
+    function decayVelocity(v, silenceMs, clampMs) {
+      if (silenceMs <= clampMs) return v;
+      const t = (silenceMs - clampMs) / clampMs;
+      const k = Math.max(0, 1 - t);
+      return [v[0] * k, v[1] * k];
+    }
+
     // ── room / connection ─────────────────────────────────────────────────────
     const room = location.hash.slice(1) || "demo";
     const name = new URLSearchParams(location.search).get("name")
@@ -70,7 +83,7 @@
 
     let me = null;
     let myColor = null;
-    const peers = {}; // user_id -> { el, dotEl, nameEl }
+    const peers = {}; // user_id -> { el, dotEl, nameEl, sim? }
 
     function ensurePeer(uid, color, nm) {
       let p = peers[uid];
@@ -86,7 +99,7 @@
         el.appendChild(dotEl);
         el.appendChild(nameEl);
         document.body.appendChild(el);
-        p = peers[uid] = { el, dotEl, nameEl };
+        p = peers[uid] = { el, dotEl, nameEl, sim: null };
       }
       applyPeerIdentity(uid, color, nm);
       return p;
@@ -109,6 +122,33 @@
       if (peers[uid]) { peers[uid].el.remove(); delete peers[uid]; }
     }
 
+    function touchPeer(uid) {
+      const p = peers[uid];
+      if (p && p.sim) p.sim.lastMsgMs = performance.now();
+    }
+
+    function onPeerCursor(uid, m) {
+      ensurePeer(uid, m.color, m.name);
+      if (m.kf || m.name || m.color) applyPeerIdentity(uid, m.color, m.name);
+      const p = peers[uid];
+      const tRecv = performance.now() / 1000;
+      const nowMs = performance.now();
+      if (!p.sim) {
+        p.sim = {
+          pLast: [m.p[0], m.p[1]],
+          vLast: [m.v[0], m.v[1]],
+          tRecvLocal: tRecv,
+          pRender: [m.p[0], m.p[1]],
+          lastMsgMs: nowMs,
+        };
+      } else {
+        p.sim.pLast = [m.p[0], m.p[1]];
+        p.sim.vLast = [m.v[0], m.v[1]];
+        p.sim.tRecvLocal = tRecv;
+        p.sim.lastMsgMs = nowMs;
+      }
+    }
+
     const ws = new WebSocket(WS_URL);
 
     ws.onmessage = (e) => {
@@ -119,17 +159,42 @@
         hud.textContent += ` | served by: ${m.replica}`;
         (m.peers || []).forEach(p => ensurePeer(p.user_id, p.color, p.name));
       } else if (m.type === "peer_joined") {
-        if (m.user_id !== me) ensurePeer(m.user_id, m.color, m.name);
+        if (m.user_id !== me) {
+          ensurePeer(m.user_id, m.color, m.name);
+          touchPeer(m.user_id);
+        }
       } else if (m.type === "peer_left") {
         dropPeer(m.user_id);
       } else if (m.type === "cursor") {
-        if (m.user_id && m.user_id !== me && m.p) {
-          ensurePeer(m.user_id, m.color, m.name);
-          if (m.kf || m.name || m.color) applyPeerIdentity(m.user_id, m.color, m.name);
-          movePeer(m.user_id, m.p[0], m.p[1]);
-        }
+        if (m.user_id && m.user_id !== me && m.p) onPeerCursor(m.user_id, m);
       }
     };
+
+    // ── M3 receiver: rAF extrapolation + blend + clamp + presence ───────────
+    let lastFrameMs = performance.now();
+
+    function reconstructionTick() {
+      const nowMs = performance.now();
+      const nowSec = nowMs / 1000;
+      const dtSec = Math.max(0, (nowMs - lastFrameMs) / 1000);
+      lastFrameMs = nowMs;
+
+      for (const uid of Object.keys(peers)) {
+        const p = peers[uid];
+        if (!p.sim) continue;
+        const silenceMs = nowMs - p.sim.lastMsgMs;
+        if (silenceMs > CONFIG.PRESENCE_TIMEOUT_MS) {
+          dropPeer(uid);
+          continue;
+        }
+        const vEff = decayVelocity(p.sim.vLast, silenceMs, CONFIG.CLAMP_MS);
+        const target = predictPosition(p.sim.pLast, vEff, p.sim.tRecvLocal, nowSec);
+        p.sim.pRender = blendToward(p.sim.pRender, target, dtSec, CONFIG.BLEND_MS);
+        movePeer(uid, p.sim.pRender[0], p.sim.pRender[1]);
+      }
+      requestAnimationFrame(reconstructionTick);
+    }
+    requestAnimationFrame(reconstructionTick);
 
     // ── M2 emitter: send-on-delta + heartbeat keyframes ───────────────────────
     let belief = null;
@@ -181,8 +246,7 @@
       if (!pointerInside) pointerInside = true;
       const t = performance.now() / 1000;
       const p = normPos(ev);
-      const firstMove = belief === null;
-      processSample(p, t, firstMove);
+      processSample(p, t, belief === null);
     });
 
     addEventListener("mouseleave", () => {
