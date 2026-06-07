@@ -1,17 +1,35 @@
 # Collaborative Cursor System
 
 Real-time multiplayer cursors over WebSockets. FastAPI + Redis backplane, designed
-to scale horizontally across stateless replicas. See `HLD_collaborative_cursors.md`
-for the design.
+to scale horizontally across stateless replicas.
 
 ## Run the full topology (Redis + 2 replicas + load balancer)
 
-Prerequisite: Docker.
+Prerequisites: Docker, Node.js (for the frontend build).
 
-    docker compose up --build
+```bash
+cd cursor-system/client
+npm install
+npm run build          # produces client/dist (nginx static root)
+
+cd ..
+docker compose up --build
+```
 
 Open http://localhost:8080 in two or more tabs. Move your mouse — cursors sync.
 Each tab shows which replica served it ("served by: app1/app2").
+
+### HMR dev (Vite proxies /ws → compose backend on :8080)
+
+In a dedicated terminal:
+
+```bash
+cd cursor-system
+docker compose up --build    # backend must be running
+
+cd client
+npm run dev                  # open the printed http://localhost:5173 URL
+```
 
 ### Demo: cross-replica fan-out + resilience
 
@@ -40,15 +58,9 @@ Multi-user draw load (watch overlapping trails in a real browser tab):
     pip install -r requirements.txt
     docker run -p 6379:6379 redis:7-alpine
     REDIS_URL=redis://localhost:6379 uvicorn app.main:app --reload --port 8000
-    # then serve client/ (e.g. `python -m http.server` in ./client) and open it
+    cd client && npm install && npm run dev
 
 ## Tests
 
     pip install -r requirements-dev.txt
     pytest
-
-## Status
-
-This is a scaffold with a thin working slice. The batching/coalescing engine,
-presence TTL, reconnect, draw trails, and the real cursor capture/render UI are
-implemented from the LLD spec (next phase).
