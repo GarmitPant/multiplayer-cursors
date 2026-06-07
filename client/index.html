@@ -9,16 +9,17 @@
               display: flex; align-items: center; }
     .dot { width: 10px; height: 10px; border-radius: 50%; }
     .name { font-size: 11px; margin-left: 6px; color: #333; }
-    #hud { position: fixed; top: 8px; left: 8px; font-size: 12px; color: #555; }
+    #hud { position: fixed; top: 8px; left: 8px; font-size: 12px; color: #555; z-index: 2; }
+    #trail { position: fixed; inset: 0; pointer-events: none; z-index: 1; }
   </style>
 </head>
 <body>
+  <canvas id="trail"></canvas>
   <div id="hud"></div>
-  <!--
-    PLACEHOLDER UI. DOM/WS glue only — engine logic lives in cursorEngine.js.
-  -->
   <script type="module">
-    import { CONFIG, Emitter, PeerReceiver } from "./cursorEngine.js";
+    import {
+      CONFIG, Emitter, PeerReceiver, OneEuro, StrokeSimplifier, TrailStore, catmullRom,
+    } from "./cursorEngine.js";
 
     const room = location.hash.slice(1) || "demo";
     const name = new URLSearchParams(location.search).get("name")
@@ -29,9 +30,25 @@
     const hud = document.getElementById("hud");
     hud.textContent = `room: ${room} | name: ${name}`;
 
+    const canvas = document.getElementById("trail");
+    const ctx = canvas.getContext("2d");
+    let dpr = window.devicePixelRatio || 1;
+
+    function resizeCanvas() {
+      dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(innerWidth * dpr);
+      canvas.height = Math.floor(innerHeight * dpr);
+      canvas.style.width = innerWidth + "px";
+      canvas.style.height = innerHeight + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resizeCanvas();
+    addEventListener("resize", resizeCanvas);
+
     let me = null;
     let myColor = null;
-    const peers = {}; // user_id -> { el, dotEl, nameEl, receiver? }
+    const peers = {}; // user_id -> { el, dotEl, nameEl, receiver?, color? }
+    const trailStore = new TrailStore();
 
     function ensurePeer(uid, color, nm) {
       let p = peers[uid];
@@ -47,7 +64,7 @@
         el.appendChild(dotEl);
         el.appendChild(nameEl);
         document.body.appendChild(el);
-        p = peers[uid] = { el, dotEl, nameEl, receiver: null };
+        p = peers[uid] = { el, dotEl, nameEl, receiver: null, color: color || "#333" };
       }
       applyPeerIdentity(uid, color, nm);
       return p;
@@ -56,8 +73,15 @@
     function applyPeerIdentity(uid, color, nm) {
       const p = peers[uid];
       if (!p) return;
-      if (color) p.dotEl.style.background = color;
+      if (color) {
+        p.color = color;
+        p.dotEl.style.background = color;
+      }
       if (nm) p.nameEl.textContent = nm;
+    }
+
+    function peerColor(uid) {
+      return peers[uid]?.color || "#333";
     }
 
     function movePeer(uid, x, y) {
@@ -67,6 +91,7 @@
     }
 
     function dropPeer(uid) {
+      trailStore.removeUser(uid);
       if (peers[uid]) { peers[uid].el.remove(); delete peers[uid]; }
     }
 
@@ -81,6 +106,38 @@
       const p = peers[uid];
       if (!p.receiver) p.receiver = new PeerReceiver();
       p.receiver.applyUpdate(m, performance.now());
+    }
+
+    function drawTrails(nowMs) {
+      const w = innerWidth;
+      const h = innerHeight;
+      ctx.clearRect(0, 0, w, h);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = 2.5;
+      for (const stroke of trailStore.renderable(nowMs)) {
+        const pts = stroke.controlPts;
+        if (pts.length === 0) continue;
+        if (pts.length === 1) {
+          ctx.globalAlpha = Math.max(0, stroke.alphas[0]);
+          ctx.fillStyle = stroke.color;
+          ctx.beginPath();
+          ctx.arc(pts[0][0] * w, pts[0][1] * h, 2, 0, Math.PI * 2);
+          ctx.fill();
+          continue;
+        }
+        const dense = catmullRom(pts, 8);
+        ctx.strokeStyle = stroke.color;
+        for (let i = 0; i < dense.length - 1; i++) {
+          const ci = Math.min(Math.floor(i / 8), stroke.alphas.length - 1);
+          ctx.globalAlpha = Math.max(0, stroke.alphas[ci]);
+          ctx.beginPath();
+          ctx.moveTo(dense[i][0] * w, dense[i][1] * h);
+          ctx.lineTo(dense[i + 1][0] * w, dense[i + 1][1] * h);
+          ctx.stroke();
+        }
+      }
+      ctx.globalAlpha = 1;
     }
 
     const ws = new WebSocket(WS_URL);
@@ -101,6 +158,13 @@
         dropPeer(m.user_id);
       } else if (m.type === "cursor") {
         if (m.user_id && m.user_id !== me && m.p) onPeerCursor(m.user_id, m);
+      } else if (m.type === "draw") {
+        if (m.user_id && m.user_id !== me && m.pts) {
+          ensurePeer(m.user_id);
+          trailStore.append(m.user_id, m.seq, m.pts, peerColor(m.user_id), performance.now());
+        }
+      } else if (m.type === "draw_end") {
+        if (m.user_id && m.user_id !== me) trailStore.markEnd(m.user_id, m.seq);
       }
     };
 
@@ -121,6 +185,7 @@
         }
         if (pos !== undefined) movePeer(uid, pos.x, pos.y);
       }
+      drawTrails(nowMs);
       requestAnimationFrame(reconstructionTick);
     }
     requestAnimationFrame(reconstructionTick);
@@ -130,12 +195,24 @@
     let lastMoveMs = 0;
     let stopped = true;
 
+    let strokeSeq = 0;
+    let dragging = false;
+    let simplifier = null;
+    let euroX = null;
+    let euroY = null;
+
     function send(msg) {
       if (msg && ws.readyState === 1) ws.send(JSON.stringify(msg));
     }
 
     function normPos(ev) {
       return [ev.clientX / innerWidth, ev.clientY / innerHeight];
+    }
+
+    function emitDrawPts(seq, pts) {
+      if (!pts.length || me === null) return;
+      send({ type: "draw", seq, pts });
+      trailStore.append(me, seq, pts, myColor || "#333", performance.now());
     }
 
     setInterval(() => {
@@ -173,6 +250,47 @@
       pointerInside = true;
       emitter.reset();
       stopped = true;
+    });
+
+    addEventListener("pointerdown", (ev) => {
+      if (ev.button !== 0) return;
+      dragging = true;
+      strokeSeq += 1;
+      const t = performance.now() / 1000;
+      const raw = normPos(ev);
+      euroX = new OneEuro(CONFIG.ONE_EURO_MINCUTOFF, CONFIG.ONE_EURO_BETA);
+      euroY = new OneEuro(CONFIG.ONE_EURO_MINCUTOFF, CONFIG.ONE_EURO_BETA);
+      euroX.filter(raw[0], t);
+      euroY.filter(raw[1], t);
+      simplifier = new StrokeSimplifier(raw, CONFIG.EPS_RDP, CONFIG.DRAW_WINDOW);
+      emitDrawPts(strokeSeq, simplifier.strokeOrigin());
+    });
+
+    addEventListener("pointermove", (ev) => {
+      if (!dragging || !simplifier) return;
+      const coalesced = ev.getCoalescedEvents ? ev.getCoalescedEvents() : [ev];
+      let t = performance.now() / 1000;
+      for (const evc of coalesced) {
+        const raw = [evc.clientX / innerWidth, evc.clientY / innerHeight];
+        const x = euroX.filter(raw[0], t);
+        const y = euroY.filter(raw[1], t);
+        t += 0.0005;
+        const emitted = simplifier.push([x, y]);
+        if (emitted.length) emitDrawPts(strokeSeq, emitted);
+      }
+    });
+
+    addEventListener("pointerup", () => {
+      if (!dragging) return;
+      dragging = false;
+      if (simplifier) {
+        const rest = simplifier.flush();
+        if (rest.length) emitDrawPts(strokeSeq, rest);
+      }
+      send({ type: "draw_end", seq: strokeSeq });
+      simplifier = null;
+      euroX = null;
+      euroY = null;
     });
   </script>
 </body>
