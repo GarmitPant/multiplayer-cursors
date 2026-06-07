@@ -43,7 +43,7 @@ async def _evict_same_user(room_id: str, user_id: str, keep: WebSocket) -> None:
                 pass
 
 
-async def _ingest(room_id: str, parsed: dict) -> None:
+def _ingest(room_id: str, parsed: dict) -> None:
     cache = caches.get(room_id)
     if cache is None:
         return
