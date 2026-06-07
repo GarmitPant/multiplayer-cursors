@@ -20,24 +20,31 @@
   z-index: 2;
 }
 
-.cursor {
+.figma-cursor {
   position: absolute;
-  transform: translate(-2px, -2px);
+  top: 0;
+  left: 0;
   pointer-events: none;
-  display: flex;
-  align-items: center;
+  will-change: transform;
 }
 
-.dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+.figma-cursor-arrow {
+  display: block;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.15));
 }
 
-.name {
+.figma-cursor-label {
+  position: absolute;
+  left: 14px;
+  top: 15px;
+  padding: 2px 8px;
+  border-radius: 999px;
   font-size: 11px;
-  margin-left: 6px;
-  color: #333;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #fff;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 .hud {

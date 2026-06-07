@@ -6,6 +6,8 @@ import {
 import { buildWsUrl, connectWithBackoff } from '../net/connection.js';
 import { fit, toScreen, toLogical } from '../coords/viewport.js';
 import { canvasIdFromParam } from '../lib/canvasCode.js';
+import { applyFigmaCursorIdentity, createFigmaCursorElement } from '../lib/figmaCursor.js';
+import AvatarStack from './AvatarStack.jsx';
 import '../App.css';
 import './CanvasPage.css';
 
@@ -102,6 +104,9 @@ export default function CanvasPage() {
   const [active, setActive] = useState(() => {
     return !!(location.state?.name || sessionStorage.getItem(NAME_KEY));
   });
+  const [presence, setPresence] = useState([]);
+  const setPresenceRef = useRef(setPresence);
+  setPresenceRef.current = setPresence;
 
   useEffect(() => {
     if (!active || !displayName) return undefined;
@@ -143,18 +148,15 @@ export default function CanvasPage() {
     function ensurePeer(uid, color, nm) {
       let p = peers[uid];
       if (!p) {
-        const el = document.createElement('div');
-        el.className = 'cursor';
-        const dotEl = document.createElement('span');
-        dotEl.className = 'dot';
-        dotEl.style.background = color || '#333';
-        const nameEl = document.createElement('span');
-        nameEl.className = 'name';
-        nameEl.textContent = nm || '';
-        el.appendChild(dotEl);
-        el.appendChild(nameEl);
-        cursorsRoot.appendChild(el);
-        p = peers[uid] = { el, dotEl, nameEl, receiver: null, color: color || '#333' };
+        const cursorParts = createFigmaCursorElement(color, nm);
+        cursorsRoot.appendChild(cursorParts.el);
+        p = peers[uid] = {
+          el: cursorParts.el,
+          cursorParts,
+          receiver: null,
+          color: color || '#333',
+          name: nm || '',
+        };
       }
       applyPeerIdentity(uid, color, nm);
       return p;
@@ -163,11 +165,9 @@ export default function CanvasPage() {
     function applyPeerIdentity(uid, color, nm) {
       const p = peers[uid];
       if (!p) return;
-      if (color) {
-        p.color = color;
-        p.dotEl.style.background = color;
-      }
-      if (nm) p.nameEl.textContent = nm;
+      if (color) p.color = color;
+      if (nm) p.name = nm;
+      applyFigmaCursorIdentity(p.cursorParts, color || p.color, nm || p.name);
     }
 
     function peerColor(uid) {
@@ -178,8 +178,7 @@ export default function CanvasPage() {
       const p = peers[uid];
       if (!p) return;
       const [sx, sy] = toScreen([x, y], board);
-      p.el.style.left = `${sx}px`;
-      p.el.style.top = `${sy}px`;
+      p.el.style.transform = `translate(${sx}px, ${sy}px)`;
     }
 
     function dropPeer(uid) {
@@ -188,6 +187,7 @@ export default function CanvasPage() {
         peers[uid].el.remove();
         delete peers[uid];
       }
+      setPresenceRef.current((prev) => prev.filter((u) => u.user_id !== uid));
     }
 
     function touchPeer(uid) {
@@ -306,12 +306,24 @@ export default function CanvasPage() {
         myColor = m.self.color;
         persistIdentity(canvasId, m.self);
         setHudText(`Canvas: ${canvasId} | name: ${m.self.name} | served by: ${m.replica}`);
+        setPresenceRef.current([
+          { user_id: m.self.user_id, name: m.self.name, color: m.self.color },
+          ...(m.peers || []).map((p) => ({
+            user_id: p.user_id,
+            name: p.name,
+            color: p.color,
+          })),
+        ]);
         (m.peers || []).forEach((p) => ensurePeer(p.user_id, p.color, p.name));
         sendPresenceKeyframe();
       } else if (m.type === 'peer_joined') {
         if (m.user_id !== me) {
           ensurePeer(m.user_id, m.color, m.name);
           touchPeer(m.user_id);
+          setPresenceRef.current((prev) => {
+            if (prev.some((u) => u.user_id === m.user_id)) return prev;
+            return [...prev, { user_id: m.user_id, name: m.name, color: m.color }];
+          });
         }
       } else if (m.type === 'peer_left') {
         dropPeer(m.user_id);
@@ -443,6 +455,7 @@ export default function CanvasPage() {
       window.removeEventListener('pointerup', onPointerUp);
       disconnect();
       Object.keys(peers).forEach(dropPeer);
+      setPresenceRef.current([]);
     };
   }, [canvasId, displayName, active]);
 
@@ -457,8 +470,11 @@ export default function CanvasPage() {
       {!active ? <NameGate onSubmit={handleNameSubmit} /> : null}
       <canvas ref={canvasRef} className="trail" />
       <div ref={cursorsRef} className="cursors" />
-      <SharePanel canvasId={canvasId} />
-      <div className="hud">{hudText}</div>
+      <AvatarStack users={presence} />
+      <div className="canvas-chrome-left">
+        <div className="hud">{hudText}</div>
+        <SharePanel canvasId={canvasId} />
+      </div>
     </div>
   );
 }
