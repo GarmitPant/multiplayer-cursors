@@ -6,6 +6,7 @@ import {
 import { buildWsUrl, connectWithBackoff } from '../net/connection.js';
 import { fit, toScreen, toLogical } from '../coords/viewport.js';
 import { canvasIdFromParam } from '../lib/canvasCode.js';
+import { mergePresenceRecord } from '../lib/presence.js';
 import { applyFigmaCursorIdentity, createFigmaCursorElement } from '../lib/figmaCursor.js';
 import AvatarStack from './AvatarStack.jsx';
 import '../App.css';
@@ -134,6 +135,26 @@ export default function CanvasPage() {
     let euroX = null;
     let euroY = null;
     let board = fit(innerWidth, innerHeight);
+    const presenceById = new Map();
+
+    function syncPresenceState() {
+      const list = Array.from(presenceById.values()).sort((a, b) => (
+        a.user_id.localeCompare(b.user_id)
+      ));
+      setPresenceRef.current(list);
+    }
+
+    function upsertPresence(user) {
+      if (!user?.user_id) return;
+      const prev = presenceById.get(user.user_id);
+      presenceById.set(user.user_id, mergePresenceRecord(prev, user));
+      syncPresenceState();
+    }
+
+    function removePresence(userId) {
+      if (!presenceById.delete(userId)) return;
+      syncPresenceState();
+    }
 
     function resizeCanvas() {
       dpr = window.devicePixelRatio || 1;
@@ -181,13 +202,17 @@ export default function CanvasPage() {
       p.el.style.transform = `translate(${sx}px, ${sy}px)`;
     }
 
-    function dropPeer(uid) {
+    function hidePeerCursor(uid) {
       trailStore.removeUser(uid);
       if (peers[uid]) {
         peers[uid].el.remove();
         delete peers[uid];
       }
-      setPresenceRef.current((prev) => prev.filter((u) => u.user_id !== uid));
+    }
+
+    function dropPeer(uid) {
+      hidePeerCursor(uid);
+      removePresence(uid);
     }
 
     function touchPeer(uid) {
@@ -197,6 +222,7 @@ export default function CanvasPage() {
 
     function onPeerCursor(uid, m) {
       ensurePeer(uid, m.color, m.name);
+      upsertPresence({ user_id: uid, name: m.name, color: m.color });
       if (m.kf || m.name || m.color) applyPeerIdentity(uid, m.color, m.name);
       const p = peers[uid];
       if (!p.receiver) p.receiver = new PeerReceiver();
@@ -290,7 +316,7 @@ export default function CanvasPage() {
         if (!p.receiver) continue;
         const pos = p.receiver.step(nowMs, dtSec);
         if (pos === null) {
-          dropPeer(uid);
+          hidePeerCursor(uid);
           continue;
         }
         if (pos !== undefined) movePeer(uid, pos.x, pos.y);
@@ -306,24 +332,15 @@ export default function CanvasPage() {
         myColor = m.self.color;
         persistIdentity(canvasId, m.self);
         setHudText(`Canvas: ${canvasId} | name: ${m.self.name} | served by: ${m.replica}`);
-        setPresenceRef.current([
-          { user_id: m.self.user_id, name: m.self.name, color: m.self.color },
-          ...(m.peers || []).map((p) => ({
-            user_id: p.user_id,
-            name: p.name,
-            color: p.color,
-          })),
-        ]);
+        upsertPresence(m.self);
+        (m.peers || []).forEach((p) => upsertPresence(p));
         (m.peers || []).forEach((p) => ensurePeer(p.user_id, p.color, p.name));
         sendPresenceKeyframe();
       } else if (m.type === 'peer_joined') {
-        if (m.user_id !== me) {
+        upsertPresence({ user_id: m.user_id, name: m.name, color: m.color });
+        if (me !== null && m.user_id !== me) {
           ensurePeer(m.user_id, m.color, m.name);
           touchPeer(m.user_id);
-          setPresenceRef.current((prev) => {
-            if (prev.some((u) => u.user_id === m.user_id)) return prev;
-            return [...prev, { user_id: m.user_id, name: m.name, color: m.color }];
-          });
         }
       } else if (m.type === 'peer_left') {
         dropPeer(m.user_id);
@@ -331,11 +348,16 @@ export default function CanvasPage() {
         if (m.user_id && m.user_id !== me && m.p) onPeerCursor(m.user_id, m);
       } else if (m.type === 'cursors') {
         for (const u of m.updates) {
-          if (u.user_id && u.user_id !== me) onPeerCursor(u.user_id, u);
+          if (u.user_id) {
+            upsertPresence({ user_id: u.user_id, name: u.name, color: u.color });
+          }
+          if (u.user_id && u.user_id !== me && u.p) onPeerCursor(u.user_id, u);
         }
       } else if (m.type === 'draw') {
         if (m.user_id && m.user_id !== me && m.pts) {
           ensurePeer(m.user_id);
+          const p = peers[m.user_id];
+          upsertPresence({ user_id: m.user_id, name: p?.name, color: p?.color });
           trailStore.append(m.user_id, m.seq, m.pts, peerColor(m.user_id), performance.now());
         }
       } else if (m.type === 'draw_end') {
@@ -455,6 +477,7 @@ export default function CanvasPage() {
       window.removeEventListener('pointerup', onPointerUp);
       disconnect();
       Object.keys(peers).forEach(dropPeer);
+      presenceById.clear();
       setPresenceRef.current([]);
     };
   }, [canvasId, displayName, active]);
