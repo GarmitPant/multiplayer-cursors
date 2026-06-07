@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
     cors_origins: str = "*"          # comma-separated in real envs
     replica_id: str = "local"        # surfaced to clients so failover is visible
+    quant_bits: int = 12
 
 
 settings = Settings()

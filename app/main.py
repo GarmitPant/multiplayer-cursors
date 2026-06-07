@@ -14,8 +14,10 @@ from contextlib import asynccontextmanager
 import redis.asyncio as redis
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 
 from .config import settings
+from . import protocol
 
 COLORS = ["#4a9eed", "#22c55e", "#f59e0b", "#ef4444",
           "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16"]
@@ -105,11 +107,17 @@ async def ws_endpoint(ws: WebSocket, room_id: str):
                 msg = json.loads(raw)
             except json.JSONDecodeError:
                 continue
-            # THIN SLICE: naive immediate relay. No batching/coalescing here.
-            if msg.get("type") in ("cursor", "draw", "cursor_leave"):
-                msg["user_id"] = identity["user_id"]
-                await publish(room_id, msg)
-            # "heartbeat" intentionally ignored in the slice.
+            try:
+                model = protocol.parse_inbound(msg)
+            except ValidationError:
+                continue
+            if model is None:
+                continue
+            if model.type == "heartbeat":
+                continue
+            out = model.model_dump(exclude_none=True)
+            out["user_id"] = identity["user_id"]
+            await publish(room_id, out)
     except WebSocketDisconnect:
         pass
     finally:

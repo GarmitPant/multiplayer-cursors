@@ -58,25 +58,31 @@
         if (m.user_id !== me) ensurePeer(m.user_id, m.color, m.name);
       } else if (m.type === "peer_left") {
         dropPeer(m.user_id);
-      } else if (m.type === "cursor" || m.type === "cursors") {
-        // slice relays single "cursor"; LLD will send batched "cursors" frames
-        const ups = m.updates || [m];
-        ups.forEach(u => {
-          if (u.user_id && u.user_id !== me) { ensurePeer(u.user_id); movePeer(u.user_id, u.x, u.y); }
-        });
+      } else if (m.type === "cursor") {
+        if (m.user_id && m.user_id !== me && m.p) {
+          ensurePeer(m.user_id, m.color, m.name);
+          movePeer(m.user_id, m.p[0], m.p[1]);
+        }
       }
-      // "draw" intentionally not rendered here — trail UX is LLD.
+      // "draw" intentionally not rendered here — trail UX is M4.
     };
 
-    // crude 20Hz throttle — placeholder only; capture strategy is the LLD innovation area
-    let last = 0;
+    // M1: naive velocity estimate; direct apply on receive (no prediction yet)
+    let last = 0, prevP = null, prevT = null;
     addEventListener("mousemove", (ev) => {
       const now = performance.now();
       if (now - last < 50) return;
       last = now;
-      if (ws.readyState === 1) {
-        ws.send(JSON.stringify({ type: "cursor", x: ev.clientX / innerWidth, y: ev.clientY / innerHeight }));
+      if (ws.readyState !== 1) return;
+      const t = now / 1000;
+      const p = [ev.clientX / innerWidth, ev.clientY / innerHeight];
+      let v = [0, 0];
+      if (prevP !== null && prevT !== null) {
+        const dt = t - prevT;
+        if (dt > 0) v = [(p[0] - prevP[0]) / dt, (p[1] - prevP[1]) / dt];
       }
+      prevP = p; prevT = t;
+      ws.send(JSON.stringify({ type: "cursor", p, v, t }));
     });
   </script>
 </body>
