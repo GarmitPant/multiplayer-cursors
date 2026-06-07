@@ -1,9 +1,16 @@
 :root {
-  font-family: sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 html, body, #root {
   margin: 0;
   height: 100%;
+}
+
+html:has(.app) {
   overflow: hidden;
+}
+
+html:has(.landing) {
+  overflow: auto;
 }
