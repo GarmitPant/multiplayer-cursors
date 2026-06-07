@@ -2,8 +2,29 @@ import { useEffect, useRef, useState } from 'react';
 import {
   CONFIG, Emitter, PeerReceiver, OneEuro, StrokeSimplifier, TrailStore, catmullRom,
 } from './cursorEngine.js';
-import { buildWsUrl } from './net/connection.js';
+import { buildWsUrl, connectWithBackoff } from './net/connection.js';
 import './App.css';
+
+function identityStorageKey(roomId) {
+  return `cursor-identity:${roomId}`;
+}
+
+function loadPersistedIdentity(roomId) {
+  try {
+    const raw = sessionStorage.getItem(identityStorageKey(roomId));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistIdentity(roomId, identity) {
+  sessionStorage.setItem(identityStorageKey(roomId), JSON.stringify({
+    user_id: identity.user_id,
+    name: identity.name,
+    color: identity.color,
+  }));
+}
 
 export default function App() {
   const canvasRef = useRef(null);
@@ -13,10 +34,11 @@ export default function App() {
 
   useEffect(() => {
     const room = location.hash.slice(1) || 'demo';
-    const name = new URLSearchParams(location.search).get('name')
-      || `anon-${Math.random().toString(36).slice(2, 6)}`;
+    const urlName = new URLSearchParams(location.search).get('name');
+    const persisted = loadPersistedIdentity(room);
+    let displayName = urlName || persisted?.name || `anon-${Math.random().toString(36).slice(2, 6)}`;
 
-    setHudText(`room: ${room} | name: ${name}`);
+    setHudText(`room: ${room} | name: ${displayName}`);
 
     const canvas = canvasRef.current;
     const cursorsRoot = cursorsRef.current;
@@ -27,6 +49,7 @@ export default function App() {
     const trailStore = new TrailStore();
     let me = null;
     let myColor = null;
+    let ws = null;
     let rafId = 0;
     let lastFrameMs = performance.now();
 
@@ -146,7 +169,15 @@ export default function App() {
     }
 
     function send(msg) {
-      if (msg && ws.readyState === 1) ws.send(JSON.stringify(msg));
+      if (msg && ws?.readyState === 1) ws.send(JSON.stringify(msg));
+    }
+
+    function sendPresenceKeyframe() {
+      if (!ws || ws.readyState !== 1 || me === null) return;
+      const t = performance.now() / 1000;
+      const p = emitter.prevP || [0.5, 0.5];
+      const v = stopped ? [0, 0] : (emitter.vSmooth || [0, 0]);
+      send(emitter.keyframe(p, t, displayName, myColor || '#333', v));
     }
 
     function normPos(ev) {
@@ -178,15 +209,16 @@ export default function App() {
       rafId = requestAnimationFrame(reconstructionTick);
     }
 
-    const ws = new WebSocket(buildWsUrl(room, name));
-
-    ws.onmessage = (e) => {
+    function onWsMessage(e) {
       const m = JSON.parse(e.data);
       if (m.type === 'init') {
         me = m.self.user_id;
         myColor = m.self.color;
-        setHudText((prev) => `${prev} | served by: ${m.replica}`);
+        displayName = m.self.name;
+        persistIdentity(room, m.self);
+        setHudText(`room: ${room} | name: ${displayName} | served by: ${m.replica}`);
         (m.peers || []).forEach((p) => ensurePeer(p.user_id, p.color, p.name));
+        sendPresenceKeyframe();
       } else if (m.type === 'peer_joined') {
         if (m.user_id !== me) {
           ensurePeer(m.user_id, m.color, m.name);
@@ -208,17 +240,26 @@ export default function App() {
       } else if (m.type === 'draw_end') {
         if (m.user_id && m.user_id !== me) trailStore.markEnd(m.user_id, m.seq);
       }
-    };
+    }
+
+    const disconnect = connectWithBackoff(() => {
+      const id = loadPersistedIdentity(room);
+      return buildWsUrl(room, displayName, id);
+    }, {
+      onOpen: (socket) => { ws = socket; },
+      onMessage: onWsMessage,
+      onClose: () => { ws = null; },
+    });
 
     const keyframeTimer = setInterval(() => {
-      if (ws.readyState !== 1 || emitter.prevP === null) return;
+      if (ws?.readyState !== 1 || emitter.prevP === null) return;
       const t = performance.now() / 1000;
       const v = stopped ? [0, 0] : (emitter.vSmooth || [0, 0]);
-      send(emitter.keyframe(emitter.prevP, t, name, myColor || '#333', v));
+      send(emitter.keyframe(emitter.prevP, t, displayName, myColor || '#333', v));
     }, CONFIG.KEYFRAME_MS);
 
     const idleTimer = setInterval(() => {
-      if (stopped || emitter.prevP === null || ws.readyState !== 1) return;
+      if (stopped || emitter.prevP === null || ws?.readyState !== 1) return;
       if (performance.now() - lastMoveMs > CONFIG.IDLE_MS) {
         stopped = true;
         send(emitter.stop(emitter.prevP, performance.now() / 1000));
@@ -237,7 +278,7 @@ export default function App() {
     function onMouseLeave() {
       pointerInside = false;
       stopped = true;
-      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'cursor_leave' }));
+      if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'cursor_leave' }));
       emitter.reset();
     }
 
@@ -309,7 +350,7 @@ export default function App() {
       window.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
-      ws.close();
+      disconnect();
       Object.keys(peers).forEach(dropPeer);
       engineRef.current = null;
     };

@@ -3,19 +3,31 @@ const WS_BASE = import.meta.env.VITE_WS_URL?.length
   ? import.meta.env.VITE_WS_URL                                              // prod: wss://<render-app>.onrender.com
   : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;   // local: same-origin via nginx
 
-export function buildWsUrl(canvasId, name) {
-  return `${WS_BASE}/ws/${canvasId}?name=${encodeURIComponent(name)}`;
+export function buildWsUrl(canvasId, name, identity = null) {
+  const params = new URLSearchParams();
+  params.set('name', name);
+  if (identity?.user_id) params.set('user_id', identity.user_id);
+  if (identity?.color) params.set('color', identity.color);
+  return `${WS_BASE}/ws/${canvasId}?${params.toString()}`;
 }
 
-/** Minimal reconnect-with-backoff wrapper (connection layer, not the engine). */
-export function connectWithBackoff(url, { onMessage, onOpen, onClose }) {
+/** Reconnect-with-backoff wrapper (connection layer, not the engine). */
+export function connectWithBackoff(urlOrFn, { onMessage, onOpen, onClose }) {
   let ws = null;
   let backoffMs = 500;
   let reconnectTimer = null;
   let closed = false;
 
+  const resolveUrl = () => (typeof urlOrFn === 'function' ? urlOrFn() : urlOrFn);
+
+  function scheduleReconnect() {
+    const jitter = backoffMs * (0.5 + Math.random() * 0.5);
+    reconnectTimer = setTimeout(connect, jitter);
+    backoffMs = Math.min(backoffMs * 2, 10_000);
+  }
+
   function connect() {
-    ws = new WebSocket(url);
+    ws = new WebSocket(resolveUrl());
     ws.onopen = () => {
       backoffMs = 500;
       onOpen?.(ws);
@@ -24,8 +36,7 @@ export function connectWithBackoff(url, { onMessage, onOpen, onClose }) {
     ws.onclose = () => {
       onClose?.();
       if (closed) return;
-      reconnectTimer = setTimeout(connect, backoffMs);
-      backoffMs = Math.min(backoffMs * 2, 10_000);
+      scheduleReconnect();
     };
   }
 

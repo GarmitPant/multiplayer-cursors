@@ -29,7 +29,21 @@ backplane = Backplane(settings.redis_url)
 identity_provider = EphemeralIdentityProvider()
 
 
-def _ingest(room_id: str, parsed: dict) -> None:
+async def _evict_same_user(room_id: str, user_id: str, keep: WebSocket) -> None:
+    """Drop any other local socket registered under the same user_id (reconnect replace)."""
+    room = rooms.get(room_id)
+    if not room:
+        return
+    for old_ws, ident in list(room.items()):
+        if old_ws is not keep and ident.get("user_id") == user_id:
+            room.pop(old_ws, None)
+            try:
+                await old_ws.close()
+            except Exception:
+                pass
+
+
+async def _ingest(room_id: str, parsed: dict) -> None:
     cache = caches.get(room_id)
     if cache is None:
         return
@@ -81,10 +95,16 @@ async def healthz():
 @app.websocket("/ws/{room_id}")
 async def ws_endpoint(ws: WebSocket, room_id: str):
     await ws.accept()
-    identity = identity_provider.create(ws.query_params.get("name"))
+    params = ws.query_params
+    identity = identity_provider.create(
+        params.get("name"),
+        user_id=params.get("user_id"),
+        color=params.get("color"),
+    )
 
     if room_id not in caches:
         caches[room_id] = RoomCache()
+    await _evict_same_user(room_id, identity["user_id"], ws)
     rooms.setdefault(room_id, {})[ws] = identity
     if room_id not in room_tasks or room_tasks[room_id].done():
         room_tasks[room_id] = asyncio.create_task(relay_room(room_id))
