@@ -15,67 +15,11 @@
 <body>
   <div id="hud"></div>
   <!--
-    PLACEHOLDER UI. M2: send-on-delta + keyframes. M3: rAF reconstruction (extrapolate + spring + clamp).
+    PLACEHOLDER UI. DOM/WS glue only — engine logic lives in cursorEngine.js.
   -->
-  <script>
-    const CONFIG = {
-      EPS_POS: 0.005,
-      VEL_SMOOTH: 0.5,
-      KEYFRAME_MS: 1500,
-      IDLE_MS: 60,
-      CLAMP_GRACE_MS: 80,
-      CLAMP_ZERO_MS: 300,
-      PRESENCE_TIMEOUT_MS: 5000,
-      SMOOTH_TIME: 0.08,
-      EPS_RDP: 0.003,
-      DRAW_WINDOW: 16,
-      ONE_EURO_MINCUTOFF: 1.0,
-      ONE_EURO_BETA: 0.007,
-      TRAIL_TTL_MS: 800,
-    };
+  <script type="module">
+    import { CONFIG, Emitter, PeerReceiver } from "./cursorEngine.js";
 
-    // ── pure helpers (mirrored in tests/test_emitter.py, tests/test_receiver.py) ─
-    function predictPosition(p0, v0, t0, t) {
-      const dt = t - t0;
-      return [p0[0] + v0[0] * dt, p0[1] + v0[1] * dt];
-    }
-
-    function distance(a, b) {
-      return Math.hypot(a[0] - b[0], a[1] - b[1]);
-    }
-
-    function shouldEmitDelta(belief, pReal, t, epsPos) {
-      if (!belief) return true;
-      const pPred = predictPosition(belief.p, belief.v, belief.t, t);
-      return distance(pReal, pPred) > epsPos;
-    }
-
-    function smoothVelocity(prevV, rawV, alpha) {
-      if (prevV === null) return rawV;
-      return [
-        alpha * rawV[0] + (1 - alpha) * prevV[0],
-        alpha * rawV[1] + (1 - alpha) * prevV[1],
-      ];
-    }
-
-    function smoothDamp(current, target, vel, smoothTime, dt) {
-      const omega = 2 / smoothTime;
-      const x = omega * dt;
-      const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
-      const change = current - target;
-      const temp = (vel + omega * change) * dt;
-      const newVel = (vel - omega * temp) * exp;
-      return [target + (change + temp) * exp, newVel];
-    }
-
-    function decayVelocity(v, silenceMs, graceMs, zeroMs) {
-      if (silenceMs <= graceMs) return v;
-      if (silenceMs >= zeroMs) return [0, 0];
-      const k = 1 - (silenceMs - graceMs) / (zeroMs - graceMs);
-      return [v[0] * k, v[1] * k];
-    }
-
-    // ── room / connection ─────────────────────────────────────────────────────
     const room = location.hash.slice(1) || "demo";
     const name = new URLSearchParams(location.search).get("name")
                  || "anon-" + Math.random().toString(36).slice(2, 6);
@@ -87,7 +31,7 @@
 
     let me = null;
     let myColor = null;
-    const peers = {}; // user_id -> { el, dotEl, nameEl, sim? }
+    const peers = {}; // user_id -> { el, dotEl, nameEl, receiver? }
 
     function ensurePeer(uid, color, nm) {
       let p = peers[uid];
@@ -103,7 +47,7 @@
         el.appendChild(dotEl);
         el.appendChild(nameEl);
         document.body.appendChild(el);
-        p = peers[uid] = { el, dotEl, nameEl, sim: null };
+        p = peers[uid] = { el, dotEl, nameEl, receiver: null };
       }
       applyPeerIdentity(uid, color, nm);
       return p;
@@ -128,30 +72,15 @@
 
     function touchPeer(uid) {
       const p = peers[uid];
-      if (p && p.sim) p.sim.lastMsgMs = performance.now();
+      if (p && p.receiver) p.receiver.touch(performance.now());
     }
 
     function onPeerCursor(uid, m) {
       ensurePeer(uid, m.color, m.name);
       if (m.kf || m.name || m.color) applyPeerIdentity(uid, m.color, m.name);
       const p = peers[uid];
-      const tRecv = performance.now() / 1000;
-      const nowMs = performance.now();
-      if (!p.sim) {
-        p.sim = {
-          pLast: [m.p[0], m.p[1]],
-          vLast: [m.v[0], m.v[1]],
-          tRecvLocal: tRecv,
-          pRender: [m.p[0], m.p[1]],
-          vRender: [0, 0],
-          lastMsgMs: nowMs,
-        };
-      } else {
-        p.sim.pLast = [m.p[0], m.p[1]];
-        p.sim.vLast = [m.v[0], m.v[1]];
-        p.sim.tRecvLocal = tRecv;
-        p.sim.lastMsgMs = nowMs;
-      }
+      if (!p.receiver) p.receiver = new PeerReceiver();
+      p.receiver.applyUpdate(m, performance.now());
     }
 
     const ws = new WebSocket(WS_URL);
@@ -175,90 +104,52 @@
       }
     };
 
-    // ── M3 receiver: rAF extrapolation + spring + clamp + presence ───────────
     let lastFrameMs = performance.now();
 
     function reconstructionTick() {
       const nowMs = performance.now();
-      const nowSec = nowMs / 1000;
       const dtSec = Math.max(0, (nowMs - lastFrameMs) / 1000);
       lastFrameMs = nowMs;
 
       for (const uid of Object.keys(peers)) {
         const p = peers[uid];
-        if (!p.sim) continue;
-        const silenceMs = nowMs - p.sim.lastMsgMs;
-        if (silenceMs > CONFIG.PRESENCE_TIMEOUT_MS) {
+        if (!p.receiver) continue;
+        const pos = p.receiver.step(nowMs, dtSec);
+        if (pos === null) {
           dropPeer(uid);
           continue;
         }
-        const vEff = decayVelocity(
-          p.sim.vLast, silenceMs, CONFIG.CLAMP_GRACE_MS, CONFIG.CLAMP_ZERO_MS);
-        const target = predictPosition(p.sim.pLast, vEff, p.sim.tRecvLocal, nowSec);
-        const [rx, nvx] = smoothDamp(
-          p.sim.pRender[0], target[0], p.sim.vRender[0], CONFIG.SMOOTH_TIME, dtSec);
-        const [ry, nvy] = smoothDamp(
-          p.sim.pRender[1], target[1], p.sim.vRender[1], CONFIG.SMOOTH_TIME, dtSec);
-        p.sim.pRender = [rx, ry];
-        p.sim.vRender = [nvx, nvy];
-        movePeer(uid, p.sim.pRender[0], p.sim.pRender[1]);
+        if (pos !== undefined) movePeer(uid, pos.x, pos.y);
       }
       requestAnimationFrame(reconstructionTick);
     }
     requestAnimationFrame(reconstructionTick);
 
-    // ── M2 emitter: send-on-delta + timer keyframes + send-on-stop ────────────
-    let belief = null;
-    let prevP = null, prevT = null;
-    let vSmooth = null;
+    const emitter = new Emitter();
     let pointerInside = true;
     let lastMoveMs = 0;
     let stopped = true;
+
+    function send(msg) {
+      if (msg && ws.readyState === 1) ws.send(JSON.stringify(msg));
+    }
 
     function normPos(ev) {
       return [ev.clientX / innerWidth, ev.clientY / innerHeight];
     }
 
-    function emitCursor(p, v, t, keyframe) {
-      if (ws.readyState !== 1) return;
-      const msg = { type: "cursor", p, v, t };
-      if (keyframe) {
-        msg.kf = true;
-        msg.name = name;
-        msg.color = myColor || "#333";
-      }
-      ws.send(JSON.stringify(msg));
-      belief = { p: [p[0], p[1]], v: [v[0], v[1]], t };
-    }
-
-    function processSample(p, t, forceEmit) {
-      let rawV = [0, 0];
-      if (prevP !== null && prevT !== null) {
-        const dt = t - prevT;
-        if (dt > 0) rawV = [(p[0] - prevP[0]) / dt, (p[1] - prevP[1]) / dt];
-      }
-      const vNew = smoothVelocity(vSmooth, rawV, CONFIG.VEL_SMOOTH);
-      vSmooth = vNew;
-      prevP = [p[0], p[1]];
-      prevT = t;
-
-      if (forceEmit || shouldEmitDelta(belief, p, t, CONFIG.EPS_POS)) {
-        emitCursor(p, vNew, t, false);
-      }
-    }
-
     setInterval(() => {
-      if (ws.readyState !== 1 || prevP === null) return;
+      if (ws.readyState !== 1 || emitter.prevP === null) return;
       const t = performance.now() / 1000;
-      const v = stopped ? [0, 0] : (vSmooth || [0, 0]);
-      emitCursor(prevP, v, t, true);
+      const v = stopped ? [0, 0] : (emitter.vSmooth || [0, 0]);
+      send(emitter.keyframe(emitter.prevP, t, name, myColor || "#333", v));
     }, CONFIG.KEYFRAME_MS);
 
     setInterval(() => {
-      if (stopped || prevP === null || ws.readyState !== 1) return;
+      if (stopped || emitter.prevP === null || ws.readyState !== 1) return;
       if (performance.now() - lastMoveMs > CONFIG.IDLE_MS) {
         stopped = true;
-        emitCursor(prevP, [0, 0], performance.now() / 1000, false);
+        send(emitter.stop(emitter.prevP, performance.now() / 1000));
       }
     }, 50);
 
@@ -268,22 +159,19 @@
       lastMoveMs = performance.now();
       const t = performance.now() / 1000;
       const p = normPos(ev);
-      processSample(p, t, belief === null);
+      send(emitter.sample(p, t, emitter.belief === null));
     });
 
     addEventListener("mouseleave", () => {
       pointerInside = false;
       stopped = true;
       if (ws.readyState === 1) ws.send(JSON.stringify({ type: "cursor_leave" }));
-      belief = null;
-      prevP = null;
-      prevT = null;
-      vSmooth = null;
+      emitter.reset();
     });
 
     addEventListener("mouseenter", () => {
       pointerInside = true;
-      belief = null;
+      emitter.reset();
       stopped = true;
     });
   </script>
