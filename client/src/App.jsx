@@ -3,7 +3,10 @@ import {
   CONFIG, Emitter, PeerReceiver, OneEuro, StrokeSimplifier, TrailStore, catmullRom,
 } from './cursorEngine.js';
 import { buildWsUrl, connectWithBackoff } from './net/connection.js';
+import { fit, toScreen, toLogical } from './coords/viewport.js';
 import './App.css';
+
+const GRID_PITCH_PX = 24;
 
 function identityStorageKey(roomId) {
   return `cursor-identity:${roomId}`;
@@ -62,6 +65,7 @@ export default function App() {
     let simplifier = null;
     let euroX = null;
     let euroY = null;
+    let board = fit(innerWidth, innerHeight);
 
     engineRef.current = { peers, trailStore, emitter };
 
@@ -72,6 +76,7 @@ export default function App() {
       canvas.style.width = `${innerWidth}px`;
       canvas.style.height = `${innerHeight}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      board = fit(innerWidth, innerHeight);
     }
 
     function ensurePeer(uid, color, nm) {
@@ -111,8 +116,9 @@ export default function App() {
     function movePeer(uid, x, y) {
       const p = peers[uid];
       if (!p) return;
-      p.el.style.left = `${x * innerWidth}px`;
-      p.el.style.top = `${y * innerHeight}px`;
+      const [sx, sy] = toScreen([x, y], board);
+      p.el.style.left = `${sx}px`;
+      p.el.style.top = `${sy}px`;
     }
 
     function dropPeer(uid) {
@@ -136,10 +142,32 @@ export default function App() {
       p.receiver.applyUpdate(m, performance.now());
     }
 
-    function drawTrails(nowMs) {
+    function drawBoard(f) {
       const w = innerWidth;
       const h = innerHeight;
       ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = '#fafafa';
+      ctx.fillRect(f.ox, f.oy, f.bw, f.bh);
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.06)';
+      ctx.lineWidth = 1;
+      for (let x = f.ox; x <= f.ox + f.bw; x += GRID_PITCH_PX) {
+        ctx.beginPath();
+        ctx.moveTo(x, f.oy);
+        ctx.lineTo(x, f.oy + f.bh);
+        ctx.stroke();
+      }
+      for (let y = f.oy; y <= f.oy + f.bh; y += GRID_PITCH_PX) {
+        ctx.beginPath();
+        ctx.moveTo(f.ox, y);
+        ctx.lineTo(f.ox + f.bw, y);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.12)';
+      ctx.strokeRect(f.ox, f.oy, f.bw, f.bh);
+    }
+
+    function drawTrails(nowMs) {
+      drawBoard(board);
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.lineWidth = 2.5;
@@ -147,10 +175,11 @@ export default function App() {
         const pts = stroke.controlPts;
         if (pts.length === 0) continue;
         if (pts.length === 1) {
+          const [sx, sy] = toScreen(pts[0], board);
           ctx.globalAlpha = Math.max(0, stroke.alphas[0]);
           ctx.fillStyle = stroke.color;
           ctx.beginPath();
-          ctx.arc(pts[0][0] * w, pts[0][1] * h, 2, 0, Math.PI * 2);
+          ctx.arc(sx, sy, 2, 0, Math.PI * 2);
           ctx.fill();
           continue;
         }
@@ -159,9 +188,11 @@ export default function App() {
         for (let i = 0; i < dense.length - 1; i++) {
           const ci = Math.min(Math.floor(i / 8), stroke.alphas.length - 1);
           ctx.globalAlpha = Math.max(0, stroke.alphas[ci]);
+          const [x0, y0] = toScreen(dense[i], board);
+          const [x1, y1] = toScreen(dense[i + 1], board);
           ctx.beginPath();
-          ctx.moveTo(dense[i][0] * w, dense[i][1] * h);
-          ctx.lineTo(dense[i + 1][0] * w, dense[i + 1][1] * h);
+          ctx.moveTo(x0, y0);
+          ctx.lineTo(x1, y1);
           ctx.stroke();
         }
       }
@@ -181,7 +212,7 @@ export default function App() {
     }
 
     function normPos(ev) {
-      return [ev.clientX / innerWidth, ev.clientY / innerHeight];
+      return toLogical([ev.clientX, ev.clientY], board);
     }
 
     function emitDrawPts(seq, pts) {
@@ -307,7 +338,7 @@ export default function App() {
       const coalesced = ev.getCoalescedEvents ? ev.getCoalescedEvents() : [ev];
       let t = performance.now() / 1000;
       for (const evc of coalesced) {
-        const raw = [evc.clientX / innerWidth, evc.clientY / innerHeight];
+        const raw = toLogical([evc.clientX, evc.clientY], board);
         const x = euroX.filter(raw[0], t);
         const y = euroY.filter(raw[1], t);
         t += 0.0005;
