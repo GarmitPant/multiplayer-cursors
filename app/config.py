@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     cors_origins: str = "*"          # comma-separated in real envs
     replica_id: str = "local"        # surfaced to clients so failover is visible
     quant_bits: int = 12
+    tick_ms: int = 50
 
 
 settings = Settings()

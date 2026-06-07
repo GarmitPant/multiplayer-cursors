@@ -158,6 +158,10 @@
         dropPeer(m.user_id);
       } else if (m.type === "cursor") {
         if (m.user_id && m.user_id !== me && m.p) onPeerCursor(m.user_id, m);
+      } else if (m.type === "cursors") {
+        for (const u of m.updates) {
+          if (u.user_id && u.user_id !== me) onPeerCursor(u.user_id, u);
+        }
       } else if (m.type === "draw") {
         if (m.user_id && m.user_id !== me && m.pts) {
           ensurePeer(m.user_id);

@@ -279,8 +279,16 @@ async def client(
 
     async with websockets.connect(f"{url}?name=bot{i}") as ws:
         async def recv():
-            async for _ in ws:
-                stats["recv"] += 1
+            async for raw in ws:
+                stats["recv_msgs"] += 1
+                try:
+                    m = json.loads(raw)
+                except Exception:
+                    continue
+                if m.get("type") == "cursors":
+                    stats["recv_pos"] += len(m.get("updates", []))
+                elif m.get("type") == "cursor":
+                    stats["recv_pos"] += 1
 
         recv_task = asyncio.create_task(recv())
         try:
@@ -333,7 +341,8 @@ async def main(args: argparse.Namespace) -> None:
     draw_bots = pick_draw_bots(args.n, args.draw_frac)
     stats = {
         "sent": 0,
-        "recv": 0,
+        "recv_msgs": 0,
+        "recv_pos": 0,
         "draw_pts": 0,
         "draw_strokes": 0,
         "draw_captured": 0,
@@ -353,7 +362,8 @@ async def main(args: argparse.Namespace) -> None:
         pts_rate = stats["draw_pts"] / dt if dt > 0 else 0.0
         print(
             f"[{dt:5.1f}s] clients={args.n} draw_bots={len(draw_bots)} "
-            f"sent/s={stats['sent']/dt:8.0f} recv/s={stats['recv']/dt:9.0f} "
+            f"sent/s={stats['sent']/dt:7.0f} "
+            f"recv_msgs/s={stats['recv_msgs']/dt:8.0f} recv_pos/s={stats['recv_pos']/dt:8.0f} "
             f"draw_pts/s={pts_rate:8.1f} strokes/s={stats['draw_strokes']/dt:6.2f} "
             f"(captured/s={cap_rate:6.0f})"
         )
