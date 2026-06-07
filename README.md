@@ -29,6 +29,11 @@ Each tab shows which replica served it ("served by: app1/app2").
     pip install -r requirements-dev.txt
     python tools/simulate.py ws://localhost:8080/ws/demo 100
 
+Multi-user draw load (watch overlapping trails in a real browser tab):
+
+    python tools/simulate.py ws://localhost:8080/ws/demo 20 --draw-frac 0.5
+    python tools/simulate.py ws://localhost:8080/ws/demo 20 --draw-frac 1.0 --draw-only
+
 ## Run a single node (no Docker, fastest inner loop)
 
     python3.12 -m venv .venv && source .venv/bin/activate
