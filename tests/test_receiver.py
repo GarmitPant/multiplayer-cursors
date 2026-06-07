@@ -3,7 +3,7 @@ import math
 
 from hypothesis import given, settings as hyp_settings, strategies as st
 
-CLAMP_GRACE_MS = 80
+CLAMP_GRACE_MS = 60
 CLAMP_ZERO_MS = 300
 PRESENCE_TIMEOUT_MS = 5000
 SMOOTH_TIME = 0.08
