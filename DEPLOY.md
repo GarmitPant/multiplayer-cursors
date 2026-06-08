@@ -29,10 +29,11 @@ it connects to Render over `wss://` cross-origin.
 
 1. Create a **Web Service** from this repo; leave **Root Directory** blank (repo root).
 2. Runtime: **Docker** (uses the existing `Dockerfile`).
-3. Add **managed Redis** (Render Key Value or external); set `REDIS_URL`.
-4. Set `CORS_ORIGINS` to your Vercel origin (placeholder OK on first deploy — update after
+3. Set **Health Check Path** to `/healthz` (pings Redis — see [README § Operations & robustness](README.md#operations--robustness)).
+4. Add **managed Redis** (Render Key Value or external); set `REDIS_URL`.
+5. Set `CORS_ORIGINS` to your Vercel origin (placeholder OK on first deploy — update after
    Vercel URL is known, then redeploy).
-5. Deploy; copy the service URL → `wss://<your-app>.onrender.com`.
+6. Deploy; copy the service URL → `wss://<your-app>.onrender.com`.
 
 Dashboard UIs change over time; the structure above is stable.
 

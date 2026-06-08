@@ -85,6 +85,61 @@ Live: https://multiplayer-cursors-sepia.vercel.app (first load after idle shows
 
 ---
 
+## Operations & robustness
+
+Tier 1 guards for the demo deploy — failures are visible, inputs are bounded; the happy
+path is unchanged.
+
+### Logging
+
+| | |
+|---|---|
+| **What** | Stdlib logging (`logger` name `cursor`, level INFO). Lifecycle: startup, Redis connect, ticker start/stop, room create/teardown, client connect/disconnect. Warnings/errors include stack traces (`exc_info=True`). |
+| **Hot path** | Per-cursor messages are **not** logged (would flood). |
+| **Where** | stdout only — no file handler (container disk is ephemeral). |
+| **Local** | `docker compose logs` or the compose terminal. |
+| **Render** | Dashboard → service → **Logs** (live tail + searchable explorer). |
+
+Logs are **transient** — retention is plan-dependent, then they expire. Durable centralized
+logging (Render log streams → Datadog/Better Stack/etc.) is a deliberate non-goal for this
+demo. Benchmark evidence lives in the repo instead (e.g. pipe a `simulate.py` run to a file).
+
+### Health check
+
+| Response | Meaning |
+|----------|---------|
+| `200` `{"ok":true,"redis":"up","replica":...}` | Redis ping succeeded |
+| `503` `{"ok":false,"redis":"down",...}` | Redis unreachable |
+
+On Render, set **Health Check Path** to `/healthz` so traffic routes only to instances that
+can function. See [DEPLOY.md](DEPLOY.md). This couples liveness to Redis; a production
+system would split **liveness** (`/healthz`) from **readiness** (`/readyz`).
+
+### Input bounds & error handling
+
+**Server**
+
+| Guard | Limit |
+|-------|-------|
+| `room_id` / canvas code | 64 chars — connection closed with WebSocket code **1008** if exceeded |
+| Display name | Sanitized (angle brackets stripped) + truncated to **32** chars |
+| Connections per room | **150** max — new connection rejected with code **1008** |
+
+**Client**
+
+- WebSocket frames parsed defensively — bad JSON dropped with `console.warn`, not thrown.
+- `ws.onerror` logged via `console.error`.
+- After **8** failed reconnect attempts, UI shows **"Can't connect — retrying…"**; backoff continues.
+
+### Scope (intentionally out of this phase)
+
+No auth (ephemeral guest identity by design), no per-IP rate limiting, and no
+metrics/tracing framework. This is a **presence demo**, not an untrusted-public-scale service —
+stdlib logging and connection-boundary guards are sufficient for observability and abuse
+prevention at demo scale.
+
+---
+
 ## Single-node dev (no Docker)
 
 ```bash
