@@ -3,10 +3,21 @@ import random
 import re
 import uuid
 
+from .config import settings
+
 COLORS = ["#4a9eed", "#22c55e", "#f59e0b", "#ef4444",
           "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16"]
 
 USER_ID_RE = re.compile(r"^u_[0-9a-f]{8}$")
+
+
+def sanitize_display_name(name: str | None) -> str:
+    """Cap length and strip angle brackets so labels cannot inject markup."""
+    nm = (name or "").strip().replace("<", "").replace(">", "")
+    max_len = settings.max_display_name_len
+    if len(nm) > max_len:
+        nm = nm[:max_len]
+    return nm or f"user-{uuid.uuid4().hex[:4]}"
 
 
 class EphemeralIdentityProvider:
@@ -27,7 +38,7 @@ class EphemeralIdentityProvider:
         else:
             uid = "u_" + uuid.uuid4().hex[:8]
 
-        nm = (name or "").strip() or f"user-{uuid.uuid4().hex[:4]}"
+        nm = sanitize_display_name(name)
 
         if color and color in self.colors:
             col = color

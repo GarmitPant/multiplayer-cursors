@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 
 import redis.asyncio as redis
+
+logger = logging.getLogger("cursor.backplane")
 
 
 def chan(room_id: str) -> str:
@@ -24,8 +27,22 @@ class Backplane:
             await self._r.aclose()
             self._r = None
 
+    async def ping(self) -> None:
+        if self._r is None:
+            raise ConnectionError("redis client not connected")
+        await self._r.ping()
+
     async def publish(self, room_id: str, payload: dict) -> None:
-        await self._r.publish(chan(room_id), json.dumps(payload))
+        try:
+            await self._r.publish(chan(room_id), json.dumps(payload))
+        except Exception:
+            logger.error(
+                "redis publish failed room=%s type=%s",
+                room_id,
+                payload.get("type"),
+                exc_info=True,
+            )
+            raise
 
     async def subscribe_room(
         self,
@@ -35,6 +52,7 @@ class Backplane:
         """Run the per-room relay loop; calls on_message(parsed_dict) for each delta."""
         pubsub = self._r.pubsub()
         await pubsub.subscribe(chan(room_id))
+        logger.info("redis subscribed room=%s", room_id)
         try:
             async for msg in pubsub.listen():
                 if msg["type"] != "message":
@@ -42,8 +60,13 @@ class Backplane:
                 try:
                     parsed = json.loads(msg["data"])
                 except json.JSONDecodeError:
+                    logger.warning("dropping non-JSON redis message room=%s", room_id)
                     continue
                 on_message(parsed)
+        except Exception:
+            logger.error("redis subscribe loop failed room=%s", room_id, exc_info=True)
+            raise
         finally:
             await pubsub.unsubscribe(chan(room_id))
             await pubsub.aclose()
+            logger.info("redis unsubscribed room=%s", room_id)

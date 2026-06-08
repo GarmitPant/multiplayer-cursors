@@ -29,6 +29,15 @@ class CursorMsg(BaseModel):
     name: Optional[str] = Field(default=None, max_length=64)
     color: Optional[str] = Field(default=None, max_length=16)
 
+    @field_validator("name")
+    @classmethod
+    def _sanitize_name(cls, v):
+        if v is None:
+            return v
+        v = v.replace("<", "").replace(">", "")
+        max_len = settings.max_display_name_len
+        return v[:max_len] if len(v) > max_len else v
+
     @field_validator("p")
     @classmethod
     def _q(cls, p):

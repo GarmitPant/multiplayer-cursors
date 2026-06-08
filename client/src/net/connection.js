@@ -3,6 +3,8 @@ const WS_BASE = import.meta.env.VITE_WS_URL?.length
   ? import.meta.env.VITE_WS_URL                                              // prod: wss://<render-app>.onrender.com
   : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;   // local: same-origin via nginx
 
+export const MAX_RECONNECT_ATTEMPTS = 8;
+
 export function buildWsUrl(canvasId, name, identity = null) {
   const params = new URLSearchParams();
   params.set('name', name);
@@ -12,11 +14,14 @@ export function buildWsUrl(canvasId, name, identity = null) {
 }
 
 /** Reconnect-with-backoff wrapper (connection layer, not the engine). */
-export function connectWithBackoff(urlOrFn, { onMessage, onOpen, onClose, onConnecting }) {
+export function connectWithBackoff(urlOrFn, {
+  onMessage, onOpen, onClose, onConnecting, onDegraded,
+}) {
   let ws = null;
   let backoffMs = 500;
   let reconnectTimer = null;
   let closed = false;
+  let consecutiveFailures = 0;
 
   const resolveUrl = () => (typeof urlOrFn === 'function' ? urlOrFn() : urlOrFn);
 
@@ -29,7 +34,11 @@ export function connectWithBackoff(urlOrFn, { onMessage, onOpen, onClose, onConn
   function connect() {
     onConnecting?.();
     ws = new WebSocket(resolveUrl());
+    ws.onerror = (ev) => {
+      console.error('WebSocket error', ev);
+    };
     ws.onopen = () => {
+      consecutiveFailures = 0;
       backoffMs = 500;
       onOpen?.(ws);
     };
@@ -37,6 +46,10 @@ export function connectWithBackoff(urlOrFn, { onMessage, onOpen, onClose, onConn
     ws.onclose = () => {
       onClose?.();
       if (closed) return;
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= MAX_RECONNECT_ATTEMPTS) {
+        onDegraded?.();
+      }
       scheduleReconnect();
     };
   }

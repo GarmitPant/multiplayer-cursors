@@ -329,7 +329,13 @@ export default function CanvasPage() {
     }
 
     function onWsMessage(e) {
-      const m = JSON.parse(e.data);
+      let m;
+      try {
+        m = JSON.parse(e.data);
+      } catch {
+        console.warn('dropping non-JSON ws frame');
+        return;
+      }
       if (m.type === 'init') {
         me = m.self.user_id;
         myColor = m.self.color;
@@ -380,10 +386,8 @@ export default function CanvasPage() {
         setConnStatusRef.current('connected');
       },
       onMessage: onWsMessage,
-      onClose: () => {
-        ws = null;
-        setConnStatusRef.current('connecting');
-      },
+      onClose: () => { ws = null; },
+      onDegraded: () => setConnStatusRef.current('degraded'),
     });
 
     const keyframeTimer = setInterval(() => {
@@ -505,9 +509,14 @@ export default function CanvasPage() {
       <canvas ref={canvasRef} className="trail" />
       <div ref={cursorsRef} className="cursors" />
       <AvatarStack users={presence} />
-      {active && connStatus !== 'connected' ? (
+      {active && connStatus === 'connecting' ? (
         <div className="connecting-banner" role="status" aria-live="polite">
           Connecting…
+        </div>
+      ) : null}
+      {active && connStatus === 'degraded' ? (
+        <div className="connecting-banner connecting-banner--degraded" role="alert" aria-live="polite">
+          Can&apos;t connect — retrying…
         </div>
       ) : null}
       <div className="canvas-chrome-left">
