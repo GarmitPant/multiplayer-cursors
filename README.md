@@ -20,6 +20,12 @@ Local Compose proves cross-replica fan-out (nginx round-robin, Redis pub/sub). T
 deploy runs a **single** backend instance on Render free tier (sleeps when idle). Both use
 the same client and server code paths.
 
+## High-level architecture
+
+![cursor-system HLD](docs/cursor-system-hld.svg)
+
+[Open editable Excalidraw diagram](https://excalidraw.com/#json=SoiWFiSgHFP06jsYZ5EAM,-tcYiQN3NPkZfMVBhBZRQQ)
+
 ---
 
 ## Local multi-replica (Docker Compose)
