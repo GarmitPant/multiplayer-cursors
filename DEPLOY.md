@@ -19,18 +19,13 @@ it connects to Render over `wss://` cross-origin.
 |----------|---------|-------|
 | `VITE_WS_URL` | `wss://your-app.onrender.com` | Render service URL, no trailing slash |
 
-Leave `VITE_WS_URL` unset locally — the client uses same-origin WebSocket via nginx.
+`app/config.py` reads `CORS_ORIGINS`; CORS middleware is wired in `app/main.py`.
 
-`app/config.py` reads `CORS_ORIGINS`; FastAPI CORS middleware is already wired in
-`app/main.py`. **This is the only backend change in the M5 phase** (config only, no new
-server logic).
-
-> **Follow-up (not required):** optionally validate the WebSocket `Origin` header against
-> the CORS allowlist in the WS endpoint.
+> Optionally validate the WebSocket `Origin` header against the CORS allowlist in the WS endpoint.
 
 ---
 
-### (HUMAN) Deploy backend to Render
+### Deploy backend to Render
 
 1. Create a **Web Service** from this repo; leave **Root Directory** blank (repo root).
 2. Runtime: **Docker** (uses the existing `Dockerfile`).
@@ -41,7 +36,7 @@ server logic).
 
 Dashboard UIs change over time; the structure above is stable.
 
-### (HUMAN) Deploy frontend to Vercel
+### Deploy frontend to Vercel
 
 1. Import the repo; set **Root Directory** to `client`.
 2. Framework preset: **Vite**; build command `npm run build`; output `dist`.
@@ -50,7 +45,7 @@ Dashboard UIs change over time; the structure above is stable.
 
 `client/vercel.json` rewrites all routes to `index.html` for React Router (`/canvas/:code`).
 
-### (HUMAN) Final CORS pass
+### Final CORS pass
 
 Set Render `CORS_ORIGINS` to the **exact** Vercel origin and redeploy if you used a
 placeholder earlier. Open the Vercel URL in two browsers — cursors/trails should sync with
