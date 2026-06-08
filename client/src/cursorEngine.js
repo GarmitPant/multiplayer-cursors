@@ -165,7 +165,7 @@ export class PeerReceiver {
   }
 }
 
-// ── draw trail engine (M4) ────────────────────────────────────────────────────
+// ── draw trail engine ───────────────────────────────────────────────────────────
 
 const PI = Math.PI;
 

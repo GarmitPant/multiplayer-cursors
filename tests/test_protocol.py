@@ -11,7 +11,7 @@ from app.protocol import (
 )
 
 
-# ── valid §7 shapes ──────────────────────────────────────────────────────────
+# ── valid protocol shapes ────────────────────────────────────────────────────
 
 def test_valid_cursor_delta():
     m = parse_inbound({"type": "cursor", "p": [0.42, 0.61], "v": [0.8, -0.2], "t": 1730000000.0})
@@ -101,7 +101,7 @@ def test_unknown_type_returns_none():
     assert parse_inbound({"type": "bogus"}) is None
 
 
-# Feature: collaborative-cursor-scaffold, Property 8: Quantization round-trip and idempotence
+# Property: Quantization round-trip and idempotence
 @hyp_settings(max_examples=100)
 @given(x=st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False))
 def test_quantize_round_trip_and_idempotent(x):
@@ -114,7 +114,7 @@ def test_quantize_round_trip_and_idempotent(x):
     assert quantize(q) == q
 
 
-# Feature: collaborative-cursor-scaffold, Property 7: Coordinate clamping is total and range-preserving
+# Property: Coordinate clamping is total and range-preserving
 @hyp_settings(max_examples=100)
 @given(x=st.floats(allow_nan=False, allow_infinity=False))
 def test_clamp01_total_and_range_preserving(x):

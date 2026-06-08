@@ -7,8 +7,8 @@ const TOL = 1e-9;
 const posDim = fc.integer({ min: 100, max: 4000 });
 
 describe('viewport transform', () => {
-  // Feature: collaborative-cursor-scaffold, Property 12: Coordinate transform round-trip (toLogical ∘ toScreen ≈ identity)
-  it('Property 12: round-trip toLogical(toScreen(l)) ≈ l', () => {
+  // Property: coordinate transform round-trip (toLogical ∘ toScreen ≈ identity)
+  it('round-trip toLogical(toScreen(l)) ≈ l', () => {
     fc.assert(
       fc.property(
         fc.double({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
@@ -26,8 +26,8 @@ describe('viewport transform', () => {
     );
   });
 
-  // Feature: collaborative-cursor-scaffold, Property 13: toScreen maps the board rectangle exactly, and the fit is centered and within the viewport
-  it('Property 13: board rect, aspect, centering, and cover-fits viewport', () => {
+  // Property: toScreen maps the board rectangle; fit is centered and cover-fits viewport
+  it('board rect, aspect, centering, and cover-fits viewport', () => {
     fc.assert(
       fc.property(posDim, posDim, (vw, vh) => {
         const f = fit(vw, vh, BOARD_ASPECT);
@@ -45,8 +45,8 @@ describe('viewport transform', () => {
     );
   });
 
-  // Feature: collaborative-cursor-scaffold, Property 14: toLogical clamping is total over any screen point
-  it('Property 14: toLogical always returns [0,1] coordinates', () => {
+  // Property: toLogical clamping is total over any screen point
+  it('toLogical always returns [0,1] coordinates', () => {
     fc.assert(
       fc.property(
         fc.double({ noNaN: true, noDefaultInfinity: true }),

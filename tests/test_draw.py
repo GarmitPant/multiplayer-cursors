@@ -1,4 +1,4 @@
-"""Tests for M4 draw trail pure functions (mirrored from client/cursorEngine.js)."""
+"""Tests for draw trail pure functions (mirrored from client/cursorEngine.js)."""
 import math
 import random
 

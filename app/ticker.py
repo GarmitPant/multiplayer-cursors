@@ -1,4 +1,4 @@
-"""Fixed-tick flush loop for Pick 2 batched fan-out."""
+"""Fixed-tick flush loop for batched room fan-out."""
 import asyncio
 
 

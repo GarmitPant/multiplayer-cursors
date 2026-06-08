@@ -1,6 +1,6 @@
-"""Property tests for M2 send-on-delta emitter logic.
+"""Property tests for send-on-delta emitter logic.
 
-Approach: pure functions mirrored from client/index.html (Python equivalents).
+Approach: pure functions mirrored from client/cursorEngine.js (Python equivalents).
 """
 import math
 
@@ -39,7 +39,7 @@ def reset_belief(p_real, v_new, t):
     return {"p": p_real, "v": v_new, "t": t}
 
 
-# Feature: collaborative-cursor-scaffold, Property 5: Send-on-delta correctness
+# Property: send-on-delta correctness
 @hyp_settings(max_examples=100)
 @given(
     p0=st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False),
@@ -72,7 +72,7 @@ def test_first_sample_always_emits(t):
     assert should_emit_delta(None, (0.5, 0.5), t)
 
 
-# Feature: collaborative-cursor-scaffold, Property 6: Velocity estimator convergence and boundedness
+# Property: velocity estimator convergence and boundedness
 @hyp_settings(max_examples=100)
 @given(
     v_true_x=st.floats(min_value=-1.0, max_value=1.0, allow_nan=False, allow_infinity=False),

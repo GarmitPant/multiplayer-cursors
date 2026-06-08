@@ -1,4 +1,4 @@
-# app/protocol.py — LLD phase: validate, clamp, quantize. No relay logic here.
+# app/protocol.py — validate, clamp, quantize inbound WS payloads. No relay logic here.
 from typing import Literal, Optional, Annotated
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 

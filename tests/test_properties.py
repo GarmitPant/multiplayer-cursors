@@ -4,9 +4,7 @@ from app.backplane import chan
 from app.identity import COLORS
 
 
-# Feature: collaborative-cursor-scaffold, Property 1: For any two distinct room
-# identifiers a and b (a != b), chan(a) != chan(b); the room->channel mapping is
-# injective so messages never cross room boundaries.
+# Property: room→channel mapping is injective (messages never cross room boundaries).
 @settings(max_examples=100)
 @given(a=st.text(), b=st.text())
 def test_room_isolation_injective_channels(a, b):
@@ -28,10 +26,7 @@ def _mint_identity(name_param):
     }
 
 
-# Feature: collaborative-cursor-scaffold, Property 2: For any sequence of connections
-# (with arbitrary or absent name query params), each assigned identity has a non-empty
-# unique user_id, a non-empty name (falling back when none provided), and a color drawn
-# from the fixed COLORS palette.
+# Property: each minted identity has unique user_id, non-empty name, color from palette.
 @settings(max_examples=100)
 @given(name_params=st.lists(st.one_of(st.none(), st.text()), min_size=1, max_size=50))
 def test_identity_valid_and_unique(name_params):
@@ -48,9 +43,7 @@ def _should_apply(update, me):
     return bool(update.get("user_id")) and update["user_id"] != me
 
 
-# Feature: collaborative-cursor-scaffold, Property 3: For any stream of relayed updates
-# carrying mixed user_ids, the client render path applies updates whose user_id differs
-# from the client's own user_id and drops every update whose user_id equals its own.
+# Property: client applies peer updates only when user_id differs from self.
 @settings(max_examples=100)
 @given(
     me=st.text(min_size=1),

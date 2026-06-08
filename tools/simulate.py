@@ -1,9 +1,9 @@
 """Open N websocket clients into one room, each sending cursor updates at ~20Hz.
 
-Uses human-like wandering paths + send-on-delta (matches client M2) so load tests
+Uses human-like wandering paths + send-on-delta (matches client emitter) so load tests
 measure realistic message rates, not random-position noise.
 
-Optional draw mode mirrors the client M4 pipeline (Bézier path → One Euro → RDP).
+Optional draw mode mirrors the client draw pipeline (Bézier path → One Euro → RDP).
 
 Usage:
   python tools/simulate.py ws://localhost:8080/ws/demo 100
@@ -139,7 +139,7 @@ async def send_cursor_msg(
 
 
 class CursorEmitter:
-    """Send-on-delta cursor helper (matches client M2)."""
+    """Send-on-delta cursor helper (matches client Emitter)."""
 
     def __init__(self):
         self.belief = None

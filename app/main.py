@@ -1,8 +1,8 @@
 """
 FastAPI glue: WebSocket endpoint, local socket registry, lifespan wiring.
 
-Pick 2: per-room RoomCache + fixed-tick batched socket fan-out (backplane ingests,
-ticker drains). Redis still carries raw deltas unchanged.
+Per-room RoomCache + fixed-tick batched socket fan-out (backplane ingests,
+ticker drains). Redis carries raw deltas unchanged.
 """
 import asyncio
 import json
@@ -160,7 +160,7 @@ async def ws_endpoint(ws: WebSocket, room_id: str):
     logger.info("client connected room=%s user=%s", room_id, identity["user_id"])
 
     # init snapshot: self + peers known to THIS replica.
-    # (Full cross-replica snapshot needs a Redis presence set — LLD phase.)
+    # (Full cross-replica snapshot would need a Redis presence set.)
     peers = [v for w, v in rooms[room_id].items() if w is not ws]
     await ws.send_text(json.dumps({
         "type": "init", "self": identity, "peers": peers,

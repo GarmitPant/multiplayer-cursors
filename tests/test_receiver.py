@@ -1,4 +1,4 @@
-"""Property tests for M3 receive-side reconstruction (mirrored from client/index.html)."""
+"""Property tests for receive-side reconstruction (mirrored from client/cursorEngine.js)."""
 import math
 
 from hypothesis import given, settings as hyp_settings, strategies as st
@@ -41,7 +41,7 @@ def should_drop_peer(silence_ms, presence_timeout_ms=PRESENCE_TIMEOUT_MS):
     return silence_ms > presence_timeout_ms
 
 
-# Feature: collaborative-cursor-scaffold, Property 4: Predictor determinism
+# Property: predictor determinism
 @hyp_settings(max_examples=100)
 @given(
     px=st.floats(min_value=-10, max_value=10, allow_nan=False, allow_infinity=False),
@@ -72,7 +72,7 @@ def _on_segment(start, end, point, eps=1e-6):
     return True
 
 
-# Feature: collaborative-cursor-scaffold, Property 11: Velocity-blend convergence without overshoot
+# Property: velocity-blend convergence without overshoot
 @hyp_settings(max_examples=100)
 @given(
     rx=st.floats(min_value=0, max_value=1, allow_nan=False, allow_infinity=False),

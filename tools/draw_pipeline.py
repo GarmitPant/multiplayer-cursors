@@ -1,4 +1,4 @@
-"""M4 draw pipeline helpers (Python mirror of client/cursorEngine.js). Used by simulate + tests."""
+"""Draw pipeline helpers (Python mirror of client/cursorEngine.js). Used by simulate + tests."""
 from __future__ import annotations
 
 import math

@@ -1,4 +1,4 @@
-"""Tier 1 robustness guards: bounded inputs and healthz."""
+"""Robustness guards: bounded inputs and healthz."""
 from unittest.mock import AsyncMock, patch
 
 import pytest

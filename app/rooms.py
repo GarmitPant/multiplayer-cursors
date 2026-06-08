@@ -1,4 +1,4 @@
-"""Per-room coalescing cache for tick-batched fan-out (Pick 2).
+"""Per-room coalescing cache for tick-batched fan-out.
 
 Sits between the Redis relay subscription and the socket write: relay_room
 ingests messages here instead of forwarding them, and the Ticker drains batched
