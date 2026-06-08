@@ -50,6 +50,13 @@ def test_peer_left_evicts_cursor():
     assert any(m["type"] == "peer_left" for m in out)
 
 
+def test_draw_end_without_prior_draw():
+    c = RoomCache()
+    c.ingest({"type": "draw_end", "user_id": "u1", "seq": 9})
+    out = c.drain()
+    assert [m["type"] for m in out] == ["draw_end"]
+
+
 def test_drain_clears_state():
     c = RoomCache()
     c.ingest({"type": "cursor", "user_id": "u1", "p": [0, 0], "v": [0, 0], "t": 1})

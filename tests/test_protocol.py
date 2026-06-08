@@ -29,6 +29,11 @@ def test_valid_cursor_keyframe():
     assert m.color == "#4a9eed"
 
 
+def test_cursor_name_none_allowed():
+    m = parse_inbound({"type": "cursor", "p": [0.5, 0.5], "v": [0.0, 0.0], "t": 1.0, "name": None})
+    assert m.name is None
+
+
 def test_valid_cursor_leave():
     m = parse_inbound({"type": "cursor_leave"})
     assert m.type == "cursor_leave"

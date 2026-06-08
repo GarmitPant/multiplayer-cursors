@@ -257,20 +257,29 @@ Reference numbers (98 simulated users, 50 ms tick, Docker multi-replica): ~20× 
 ## Testing
 
 ```bash
-source .venv/bin/activate && pip install -r requirements-dev.txt && pytest   # 50 tests
+source .venv/bin/activate && pip install -r requirements-dev.txt && pytest   # 81 tests, 100% app/ coverage
 cd client && npm run test    # vitest: viewport + inspector metrics
 cd client && npm run build
 ```
 
+**No live Redis required** — all backend tests use **fakeredis** (in-memory pub/sub). This runs the same way locally, in CI, and on Render build pipelines; production still uses real `REDIS_URL`.
+
 | Suite | Covers |
 |-------|--------|
 | `test_protocol.py` | Inbound validation, quantize properties, `set_tick_ms` bounds |
-| `test_coalescing.py` | RoomCache ingest/drain |
-| `test_emitter.py` / `test_receiver.py` | Engine parity with client |
-| `test_robustness.py` | healthz, room_id length, display-name sanitize, **connection cap** |
-| `test_draw.py` | Draw relay |
-| `test_smoke.py` | WS integration smoke |
+| `test_coalescing.py` | RoomCache ingest/drain (LWW, draw append, peer_left) |
+| `test_emitter.py` / `test_receiver.py` | Engine parity with client (Python mirrors) |
+| `test_robustness.py` | healthz, room_id length, display-name sanitize, connection cap |
+| `test_backplane.py` | Redis publish/subscribe, error paths (fakeredis) |
+| `test_ticker.py` | Tick drain loop, empty-cache skip |
+| `test_main_ws.py` | WS handler, init payloads, reconnect eviction, publish errors |
+| `test_integration.py` | **End-to-end:** two clients, batched `cursors` / `draw` payloads, room teardown |
+| `test_lifecycle.py` | App lifespan, cursor_leave, validation drops |
+| `test_draw.py` | Draw pipeline pure functions |
+| `test_smoke.py` | healthz smoke |
 | `client/src/coords/viewport.test.js` | Cover-fit mapping properties |
+
+`pytest.ini` enforces **100% line coverage** on `app/` (`--cov-fail-under=100`).
 
 ---
 

@@ -61,10 +61,14 @@ Tabs on `app1` auto-reconnect to another replica; persisted identity keeps the s
 ```bash
 source .venv/bin/activate
 pip install -r requirements-dev.txt
-pytest
+pytest                     # 81 tests, 100% line coverage on app/
 
-cd client && npm run test    # viewport property tests (vitest)
+cd client && npm run test    # viewport + inspector metrics (vitest)
 ```
+
+Backend tests use **fakeredis** (no live Redis). Integration tests open real in-process
+WebSockets, publish through pub/sub, and assert batched outbound JSON (`cursors`, `draw`).
+Production on Render still uses managed Redis via `REDIS_URL`.
 
 ### Load test
 
