@@ -247,4 +247,8 @@ async def ws_endpoint(ws: WebSocket, room_id: str):
             task = room_tasks.pop(room_id, None)
             if task:
                 task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
             logger.info("room torn down room=%s", room_id)

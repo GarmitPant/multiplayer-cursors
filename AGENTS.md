@@ -28,6 +28,11 @@ Real-time multiplayer cursors and draw trails over WebSockets.
 3. **Coordinates are logical `[0,1]`** — convert only through `client/src/coords/viewport.js` (`fit`, `toScreen`, `toLogical`). Board is 16:9 cover-fit into the viewport.
 4. **Server relays, does not interpret cursors** — validates/clamps/quantizes inbound JSON, publishes to Redis, coalesces per room, flushes batched frames on a tick.
 5. **No auth** — ephemeral guest identity minted on connect; clients may resubmit `user_id` + `color` query params for reconnect continuity.
+6. **Heartbeat keyframes are timer-driven** — `CanvasPage` fires `Emitter.keyframe()` every `KEYFRAME_MS` (~1.5s) regardless of mouse motion; `keyframe()` must update `prevP`/`prevT` so motionless connected users stay visible to peers.
+7. **Trail TTL owns cleanup** — `TrailStore` fades points via `TRAIL_TTL_MS` and drops stroke bookkeeping once all points expire (no `draw_end` required).
+8. **Room teardown cleans up Redis** — when the last local socket leaves a room, the subscribe task is cancelled **and awaited** so pubsub subscriptions do not leak under churn.
+
+Empty `app/__init__.py` / `tests/__init__.py` are intentional Python package markers (not scope stubs).
 
 ---
 
@@ -188,10 +193,10 @@ Draw points are **never dropped**; cursor updates coalesce to latest position pe
 
 ### Key classes
 
-- **`Emitter`** — `sample()`, `keyframe()`, `stop()`; send-on-delta using constant-velocity prediction.
+- **`Emitter`** — `sample()`, `keyframe()`, `stop()`; send-on-delta using constant-velocity prediction. `keyframe()` updates `belief` **and** `prevP`/`prevT` for timer-driven presence.
 - **`PeerReceiver`** — applies inbound cursor updates; `step()` in rAF for smooth display.
 - **`StrokeSimplifier` + `OneEuro`** — draw capture pipeline (matches `tools/draw_pipeline.py`).
-- **`TrailStore`** — local trail rendering with Catmull-Rom splines.
+- **`TrailStore`** — local trail rendering with Catmull-Rom splines; TTL removes visible points and purges empty stroke entries.
 
 ---
 
@@ -211,6 +216,7 @@ Canvas codes: uppercase alphanumeric (`canvasCode.js`), 6 chars generated on cre
 - **`presenceById` Map** → React `presence` for AvatarStack (merge on init/join/cursors; remove on `peer_left` only)
 - **`peers` object** — DOM cursor elements + `PeerReceiver` instances (separate from avatar state)
 - Identity persisted in `sessionStorage` per room (`user_id`, `color`, `name`)
+- **Periodic keyframes** — `setInterval(KEYFRAME_MS)` sends name/color even when the pointer is idle (after init or any prior keyframe)
 
 ### Inspector overlay (`InspectorOverlay.jsx`)
 
@@ -261,7 +267,7 @@ cd client && npm run build
 | `test_protocol.py` | Inbound validation, quantize properties, `set_tick_ms` bounds |
 | `test_coalescing.py` | RoomCache ingest/drain |
 | `test_emitter.py` / `test_receiver.py` | Engine parity with client |
-| `test_robustness.py` | healthz, room_id length, connection cap |
+| `test_robustness.py` | healthz, room_id length, display-name sanitize, **connection cap** |
 | `test_draw.py` | Draw relay |
 | `test_smoke.py` | WS integration smoke |
 | `client/src/coords/viewport.test.js` | Cover-fit mapping properties |
@@ -302,7 +308,7 @@ Bots use the same send-on-delta and draw pipeline as the client. Stats print eve
 | Task | Start here |
 |------|------------|
 | Add inbound message type | `app/protocol.py`, `app/main.py`, `app/rooms.py` (if passthrough/batch) |
-| Change batching / tick | `app/rooms.py`, `app/ticker.py`, `app/main.py` |
+| Change batching / tick | `app/rooms.py`, `app/ticker.py`, `app/main.py` (teardown awaits subscribe task) |
 | Change cursor send logic | `client/src/cursorEngine.js` (`Emitter`) |
 | Change peer rendering | `client/src/cursorEngine.js` (`PeerReceiver`), `CanvasPage.jsx` rAF loop |
 | WS reconnect / URL | `client/src/net/connection.js` |

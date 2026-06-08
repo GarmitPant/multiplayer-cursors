@@ -104,6 +104,8 @@ export class Emitter {
       color: color || "#333",
     };
     this.belief = { p: [p[0], p[1]], v: [vel[0], vel[1]], t };
+    this.prevP = [p[0], p[1]];
+    this.prevT = t;
     return msg;
   }
 
@@ -360,7 +362,7 @@ export class TrailStore {
     for (const [key, stroke] of this.strokes.entries()) {
       stroke.points = stroke.points.filter(p => (nowMs - p.born) <= ttl);
       if (stroke.points.length === 0) {
-        if (stroke.ended) toDelete.push(key);
+        toDelete.push(key);
         continue;
       }
       result.push({

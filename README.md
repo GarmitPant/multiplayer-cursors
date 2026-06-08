@@ -159,11 +159,19 @@ system would split **liveness** (`/healthz`) from **readiness** (`/readyz`).
 | Display name | Sanitized (angle brackets stripped) + truncated to **32** chars |
 | Connections per room | **150** max — new connection rejected with code **1008** |
 
+Bounds above are covered by `tests/test_robustness.py` (cap test uses a lowered limit for speed).
+
 **Client**
 
 - WebSocket frames parsed defensively — bad JSON dropped with `console.warn`, not thrown.
 - `ws.onerror` logged via `console.error`.
 - After **8** failed reconnect attempts, UI shows **"Can't connect — retrying…"**; backoff continues.
+
+**Lifecycle**
+
+- **Presence keyframes** — timer-driven every ~1.5s (`KEYFRAME_MS`), including for motionless users, so peers do not time out idle connections.
+- **Room teardown** — last disconnect in a room cancels and **awaits** the Redis subscribe task (pubsub unsubscribe) before the room slot is reused.
+- **Trail fade** — per-point TTL (`TRAIL_TTL_MS`); empty stroke entries are purged client-side even if `draw_end` never arrived.
 
 ### Scope (intentionally out of this phase)
 
