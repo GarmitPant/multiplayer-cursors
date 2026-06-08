@@ -116,7 +116,7 @@ delivery latency, which the client-side reconstruction smooths out.
 
 Frontend (Vercel, static SPA) + backend (Render, Docker + managed Redis), connected
 over wss:// — Vercel can't host a persistent WebSocket, so the FastAPI WS server runs
-on Render. Full steps and env vars: see [DEPLOY.md](DEPLOY.md).
+on Render. Full steps and env vars: see [DEPLOY.md](DEPLOY.md). API documentation: [API.md](API.md).
 
 Live: https://multiplayer-cursors-sepia.vercel.app (first load after idle shows
 "Connecting…" during Render cold start).

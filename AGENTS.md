@@ -126,6 +126,8 @@ Draw points are **never dropped**; cursor updates coalesce to latest position pe
 
 ## WebSocket protocol
 
+API documentation (message types, fields, limits, batching): **[API.md](API.md)**. Summary below:
+
 **Endpoint:** `GET /ws/{room_id}?name=&user_id=&color=`
 
 **Room ID:** canvas code, max **64** chars (longer → close **1008**). Max **150** connections per room.
@@ -322,4 +324,4 @@ Bots use the same send-on-delta and draw pipeline as the client. Stats print eve
 | Change peer rendering | `client/src/cursorEngine.js` (`PeerReceiver`), `CanvasPage.jsx` rAF loop |
 | WS reconnect / URL | `client/src/net/connection.js` |
 | UI chrome / inspector | `client/src/ui/InspectorOverlay.jsx`, `CanvasPage.jsx` |
-| Deploy / env | `DEPLOY.md`, `app/config.py`, `client/.env.example` |
+| Deploy / env | `DEPLOY.md`, `API.md`, `app/config.py`, `client/.env.example` |
