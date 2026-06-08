@@ -50,6 +50,27 @@ def test_valid_heartbeat():
     assert m.type == "heartbeat"
 
 
+def test_valid_set_tick_ms():
+    m = parse_inbound({"type": "set_tick_ms", "value": 50})
+    assert m.type == "set_tick_ms"
+    assert m.value == 50
+
+
+def test_set_tick_ms_accepts_minimum():
+    m = parse_inbound({"type": "set_tick_ms", "value": 1})
+    assert m.value == 1
+
+
+def test_set_tick_ms_clamps_low():
+    with pytest.raises(ValidationError):
+        parse_inbound({"type": "set_tick_ms", "value": 0})
+
+
+def test_set_tick_ms_clamps_high():
+    with pytest.raises(ValidationError):
+        parse_inbound({"type": "set_tick_ms", "value": 501})
+
+
 # ── malformed / rejected ─────────────────────────────────────────────────────
 
 def test_missing_required_fields_raises():

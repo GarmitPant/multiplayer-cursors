@@ -72,10 +72,17 @@ class HeartbeatMsg(BaseModel):
     type: Literal["heartbeat"]
 
 
+class SetTickMsMsg(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["set_tick_ms"]
+    value: int = Field(ge=1, le=500)
+
+
 # Discriminated union dispatched on `type`; parse_inbound returns a model or raises/None.
 INBOUND = {
     "cursor": CursorMsg, "cursor_leave": CursorLeaveMsg,
     "draw": DrawMsg, "draw_end": DrawEndMsg, "heartbeat": HeartbeatMsg,
+    "set_tick_ms": SetTickMsMsg,
 }
 
 

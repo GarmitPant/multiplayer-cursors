@@ -44,7 +44,7 @@ class RoomCache:
             if s is None:
                 s = self.strokes[key] = {"user_id": uid, "seq": msg["seq"], "pts": [], "ended": False}
             s["ended"] = True
-        elif t in ("peer_joined", "peer_left", "cursor_leave"):
+        elif t in ("peer_joined", "peer_left", "cursor_leave", "tick_ms"):
             self.presence.append(msg)
             if t == "peer_left":
                 self.cursors.pop(uid, None)         # don't flush a departed user's cursor

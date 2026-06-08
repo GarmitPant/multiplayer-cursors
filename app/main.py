@@ -83,8 +83,10 @@ async def lifespan(app: FastAPI):
     logger.info("app startup replica=%s", settings.replica_id)
     await backplane.connect()
     logger.info("redis connected url=%s", settings.redis_url.split("@")[-1])
+    tick_state = {"tick_ms": settings.tick_ms}
+    app.state.tick_state = tick_state
     app.state.ticker_task = asyncio.create_task(
-        ticker.run_ticker(settings.tick_ms, caches, flush_fn)
+        ticker.run_ticker(tick_state, caches, flush_fn)
     )
     logger.info("ticker started tick_ms=%d", settings.tick_ms)
     yield
@@ -163,6 +165,8 @@ async def ws_endpoint(ws: WebSocket, room_id: str):
     await ws.send_text(json.dumps({
         "type": "init", "self": identity, "peers": peers,
         "replica": settings.replica_id,
+        "tick_ms": app.state.tick_state["tick_ms"],
+        "default_tick_ms": settings.tick_ms,
     }))
     try:
         await backplane.publish(room_id, {"type": "peer_joined", **identity})
@@ -188,6 +192,28 @@ async def ws_endpoint(ws: WebSocket, room_id: str):
             if model is None:
                 continue
             if model.type == "heartbeat":
+                continue
+            if model.type == "set_tick_ms":
+                app.state.tick_state["tick_ms"] = model.value
+                logger.info(
+                    "tick_ms changed to %d by %s",
+                    model.value,
+                    identity["user_id"],
+                )
+                # Per-room broadcast so inspector sliders stay in sync. The ticker
+                # loop is one task per replica (all rooms); users in other rooms
+                # on this replica feel the new interval but their slider won't update.
+                try:
+                    await backplane.publish(
+                        room_id, {"type": "tick_ms", "value": model.value},
+                    )
+                except Exception:
+                    logger.error(
+                        "tick_ms broadcast failed room=%s user=%s",
+                        room_id,
+                        identity["user_id"],
+                        exc_info=True,
+                    )
                 continue
             out = model.model_dump(exclude_none=True)
             out["user_id"] = identity["user_id"]

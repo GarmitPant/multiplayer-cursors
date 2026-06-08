@@ -9,11 +9,19 @@ import { canvasIdFromParam } from '../lib/canvasCode.js';
 import { mergePresenceRecord } from '../lib/presence.js';
 import { applyFigmaCursorIdentity, createFigmaCursorElement } from '../lib/figmaCursor.js';
 import AvatarStack from './AvatarStack.jsx';
+import InspectorOverlay from './InspectorOverlay.jsx';
+import { createInspectorMetrics } from '../metrics/inspectorMetrics.js';
 import '../App.css';
 import './CanvasPage.css';
 
 const GRID_PITCH_PX = 24;
 const NAME_KEY = 'cursor-display-name';
+const UI_BLOCK_SELECTOR = '.inspector-root, .canvas-chrome-left, .avatar-stack, .name-gate, .connecting-banner';
+
+function eventOverUiChrome(ev) {
+  const t = ev.target;
+  return t instanceof Element && t.closest(UI_BLOCK_SELECTOR) != null;
+}
 
 function identityStorageKey(roomId) {
   return `cursor-identity:${roomId}`;
@@ -107,10 +115,16 @@ export default function CanvasPage() {
   });
   const [presence, setPresence] = useState([]);
   const [connStatus, setConnStatus] = useState('connecting');
+  const [serverTickDefault, setServerTickDefault] = useState(null);
   const setPresenceRef = useRef(setPresence);
   setPresenceRef.current = setPresence;
   const setConnStatusRef = useRef(setConnStatus);
   setConnStatusRef.current = setConnStatus;
+  const metricsRef = useRef(createInspectorMetrics());
+  const emitterConfigRef = useRef({ ...CONFIG });
+  const getPeerCountRef = useRef(() => 0);
+  const sendTickMsRef = useRef(() => {});
+  const syncTickFromServerRef = useRef(null);
 
   useEffect(() => {
     if (!active || !displayName) return undefined;
@@ -128,7 +142,9 @@ export default function CanvasPage() {
     let rafId = 0;
     let lastFrameMs = performance.now();
 
-    const emitter = new Emitter();
+    const emitter = new Emitter(emitterConfigRef.current);
+    const metrics = metricsRef.current;
+    metrics.resetWindow();
     let pointerInside = true;
     let lastMoveMs = 0;
     let stopped = true;
@@ -288,8 +304,16 @@ export default function CanvasPage() {
     }
 
     function send(msg) {
-      if (msg && ws?.readyState === 1) ws.send(JSON.stringify(msg));
+      if (!msg || ws?.readyState !== 1) return;
+      ws.send(JSON.stringify(msg));
+      metrics.recordSend();
     }
+
+    sendTickMsRef.current = (value) => {
+      send({ type: 'set_tick_ms', value });
+    };
+
+    getPeerCountRef.current = () => Math.max(0, presenceById.size - (me ? 1 : 0));
 
     function sendPresenceKeyframe() {
       if (!ws || ws.readyState !== 1 || me === null) return;
@@ -336,9 +360,12 @@ export default function CanvasPage() {
         console.warn('dropping non-JSON ws frame');
         return;
       }
+      metrics.recordRecv(m);
       if (m.type === 'init') {
         me = m.self.user_id;
         myColor = m.self.color;
+        if (m.default_tick_ms != null) setServerTickDefault(m.default_tick_ms);
+        if (m.tick_ms != null) syncTickFromServerRef.current?.(m.tick_ms);
         persistIdentity(canvasId, m.self);
         setHudText(`Canvas: ${canvasId} | name: ${m.self.name} | served by: ${m.replica}`);
         upsertPresence(m.self);
@@ -371,6 +398,8 @@ export default function CanvasPage() {
         }
       } else if (m.type === 'draw_end') {
         if (m.user_id && m.user_id !== me) trailStore.markEnd(m.user_id, m.seq);
+      } else if (m.type === 'tick_ms' && m.value != null) {
+        syncTickFromServerRef.current?.(m.value);
       }
     }
 
@@ -406,6 +435,7 @@ export default function CanvasPage() {
     }, 50);
 
     function onMouseMove(ev) {
+      if (eventOverUiChrome(ev)) return;
       if (!pointerInside) pointerInside = true;
       stopped = false;
       lastMoveMs = performance.now();
@@ -417,7 +447,10 @@ export default function CanvasPage() {
     function onMouseLeave() {
       pointerInside = false;
       stopped = true;
-      if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'cursor_leave' }));
+      if (ws?.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'cursor_leave' }));
+        metrics.recordSend();
+      }
       emitter.reset();
     }
 
@@ -428,7 +461,7 @@ export default function CanvasPage() {
     }
 
     function onPointerDown(ev) {
-      if (ev.button !== 0) return;
+      if (ev.button !== 0 || eventOverUiChrome(ev)) return;
       dragging = true;
       strokeSeq += 1;
       const t = performance.now() / 1000;
@@ -442,7 +475,7 @@ export default function CanvasPage() {
     }
 
     function onPointerMove(ev) {
-      if (!dragging || !simplifier) return;
+      if (!dragging || !simplifier || eventOverUiChrome(ev)) return;
       const coalesced = ev.getCoalescedEvents ? ev.getCoalescedEvents() : [ev];
       let t = performance.now() / 1000;
       for (const evc of coalesced) {
@@ -523,6 +556,16 @@ export default function CanvasPage() {
         <div className="hud">{hudText}</div>
         <SharePanel canvasId={canvasId} />
       </div>
+      {active ? (
+        <InspectorOverlay
+          metricsRef={metricsRef}
+          getPeerCountRef={getPeerCountRef}
+          emitterConfigRef={emitterConfigRef}
+          onSetTickMs={(value) => sendTickMsRef.current(value)}
+          defaultTickMs={serverTickDefault}
+          syncTickFromServerRef={syncTickFromServerRef}
+        />
+      ) : null}
     </div>
   );
 }
