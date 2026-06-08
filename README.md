@@ -4,6 +4,11 @@ Real-time multiplayer cursors and draw trails over WebSockets. Vite + React fron
 FastAPI + Redis backplane backend. The server is a dumb relay — all cursor intelligence
 lives in the shared client engine (`client/src/cursorEngine.js`).
 
+## Live demo
+
+**https://multiplayer-cursors-sepia.vercel.app** — the first load after idle shows
+**"Connecting…"** while Render wakes from cold start (~30–60s), then cursors sync normally.
+
 ## Two deployment modes
 
 | Mode | Purpose | Topology |
@@ -22,7 +27,7 @@ the same client and server code paths.
 Prerequisites: Docker, Node.js 18+.
 
 ```bash
-cd cursor-system/client
+cd client
 npm install
 npm run build          # produces client/dist (nginx static root)
 
@@ -37,8 +42,7 @@ accepted the WebSocket).
 ### HMR dev (Vite proxies `/ws` → compose backend on `:8080`)
 
 ```bash
-cd cursor-system
-docker compose up --build    # backend must be running
+docker compose up --build    # from repo root; backend must be running
 
 cd client
 npm run dev                  # open http://localhost:5173
@@ -77,7 +81,7 @@ it connects to Render over `wss://` cross-origin.
 
 ### Environment variables
 
-**Render Web Service** (repo root: `cursor-system/`, Docker, existing `Dockerfile`):
+**Render Web Service** (repo root, Docker, existing `Dockerfile`):
 
 | Variable | Example | Notes |
 |----------|---------|-------|
@@ -104,7 +108,7 @@ server logic).
 
 ### (HUMAN) Deploy backend to Render
 
-1. Create a **Web Service** from this repo; set **Root Directory** to `cursor-system`.
+1. Create a **Web Service** from this repo; leave **Root Directory** blank (repo root).
 2. Runtime: **Docker** (uses the existing `Dockerfile`).
 3. Add **managed Redis** (Render Key Value or external); set `REDIS_URL`.
 4. Set `CORS_ORIGINS` to your Vercel origin (placeholder OK on first deploy — update after
@@ -115,7 +119,7 @@ Dashboard UIs change over time; the structure above is stable.
 
 ### (HUMAN) Deploy frontend to Vercel
 
-1. Import the repo; set **Root Directory** to `cursor-system/client`.
+1. Import the repo; set **Root Directory** to `client`.
 2. Framework preset: **Vite**; build command `npm run build`; output `dist`.
 3. Set `VITE_WS_URL=wss://<your-app>.onrender.com` (from Render step).
 4. Deploy; copy the Vercel URL (e.g. `https://your-app.vercel.app`).
