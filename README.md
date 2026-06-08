@@ -74,6 +74,40 @@ python tools/simulate.py ws://localhost:8080/ws/demo 100
 
 ---
 
+## Performance: measured fan-out reduction
+
+Two optimizations work on opposite ends of the message pipe, and were measured
+independently. Both runs: **98 simulated users in one room, human-like cursor paths,
+local Docker (Redis + replicas + nginx), server tick = 50ms (20 Hz)**, steady state.
+
+- **Send-on-delta (client-side source reduction):** each client only emits when its
+  real position diverges from a shared constant-velocity prediction past a threshold,
+  so a cursor moving in a straight line emits almost nothing. This thins what each
+  client *sends*.
+- **+ Server-side batched fan-out:** the server coalesces per-room state and flushes
+  one batched frame per client per tick instead of relaying every message immediately.
+  This thins what each client *receives*. (Cursors coalesce last-write-wins; draw
+  strokes are appended, never dropped.)
+
+| Metric (98 users, steady state) | Send-on-delta only | Send-on-delta + Server batching | Change |
+|---|---|---|---|
+| Client emit rate (`sent/s`) | ~383 | ~380 | unchanged (batching is receive-side) |
+| Total inbound messages/s | ~37,500 | ~1,860 | **~20× fewer** |
+| Per-client inbound messages/s | ~383 | ~19 | **~20× fewer** |
+| Position info delivered/s | ~37,500 | ~36,400 | preserved (no fidelity lost) |
+
+For reference, a naive client (emit every frame at 20 Hz, no suppression) would send
+~1,960 msg/s and fan out to ~190,000 inbound msg/s. Send-on-delta cuts the send side
+~80% (1,960 → ~383); server batching then cuts inbound ~20× (~37,500 → ~1,860) by
+making inbound scale with tick rate (`users × 20 Hz`) instead of with the number of
+active senders.
+
+**Takeaway:** ~20× fewer inbound messages per client with no loss of cursor fidelity
+(~36k positions/s delivered either way), at the cost of ≤ one tick (≤50 ms) of added
+delivery latency, which the client-side reconstruction smooths out.
+
+---
+
 ## Deployment
 
 Frontend (Vercel, static SPA) + backend (Render, Docker + managed Redis), connected
